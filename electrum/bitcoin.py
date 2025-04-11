@@ -895,3 +895,35 @@ def verify_usermessage_with_address(address: str, sig65: bytes, message: bytes, 
     # check message
     # note: `$ bitcoin-cli verifymessage` does NOT enforce the low-S rule for ecdsa sigs
     return public_key.ecdsa_verify(sig65[1:], h, enforce_low_s=False)
+
+
+####### silent payments (bip-352) #######
+
+
+def decode_silent_payment_addr(address: str, hrp: str = "tsp"):
+    _, data = decode(hrp, address)
+    if data is None:
+        return ecc.ECPubkey(None), ecc.ECPubkey(None) # what to return here? This returns basically two ecc.POINT_AT_INFINITY. Maybe just return None?
+    data_bytes = bytes(data)
+    B_scan = ecc.ECPubkey(data_bytes[:33])
+    B_spend = ecc.ECPubkey(data_bytes[33:])
+    return B_scan, B_spend
+
+# method in segwit_addr.decode_segwit_address does kind of the same, but has length restrictions. I got this from bip-reference
+def decode(hrp, addr):
+    """Decode a segwit address."""
+    #hrpgot, data, spec = bech32_decode(addr, ignore_long_length=True)
+    dec: segwit_addr.DecodedBech32 = segwit_addr.bech32_decode(addr, ignore_long_length=True) # this differs slightly from reference
+    hrpgot = dec.hrp
+    data = dec.data
+    if hrpgot != hrp:
+        print(f"{hrpgot=} != {hrp=}")
+        return (None, None)
+    decoded = segwit_addr.convertbits(data[1:], 5, 8, False)
+    if decoded is None or len(decoded) < 2:
+        print("decoded is None or len(decoded) < 2")
+        return (None, None)
+    if data[0] > 16:
+        print("data[0] > 16")
+        return (None, None)
+    return (data[0], decoded)

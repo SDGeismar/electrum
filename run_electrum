@@ -317,7 +317,6 @@ def main():
     util.setup_thread_excepthook()
     # on macOS, delete Process Serial Number arg generated for apps launched in Finder
     sys.argv = list(filter(lambda x: not x.startswith('-psn'), sys.argv))
-
     # old 'help' syntax
     if len(sys.argv) > 1 and sys.argv[1] == 'help':
         sys.argv.remove('help')
