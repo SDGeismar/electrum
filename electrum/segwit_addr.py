@@ -131,11 +131,11 @@ def convertbits(data: Iterable[int], frombits: int, tobits: int, pad: bool = Tru
     return ret
 
 
-def decode_segwit_address(hrp: str, addr: Optional[str]) -> Tuple[Optional[int], Optional[Sequence[int]]]:
+def decode_segwit_address(hrp: str, addr: Optional[str], ignore_long_length: bool = False) -> Tuple[Optional[int], Optional[Sequence[int]]]:
     """Decode a segwit address."""
     if addr is None:
         return (None, None)
-    encoding, hrpgot, data = bech32_decode(addr)
+    encoding, hrpgot, data = bech32_decode(addr,ignore_long_length=ignore_long_length)
     if hrpgot != hrp:
         return (None, None)
     decoded = convertbits(data[1:], 5, 8, False)

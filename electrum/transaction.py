@@ -1476,6 +1476,7 @@ class PartialTxInput(TxInput, PSBTSection):
         self._is_p2sh_segwit = None  # type: Optional[bool]  # None means unknown
         self._is_native_segwit = None  # type: Optional[bool]  # None means unknown
         self._is_taproot = None  # type: Optional[bool]  # None means unknown
+        self._is_silentPayment = None # type: Optional[bool]  # None means unknown
         self.witness_sizehint = None  # type: Optional[int]  # byte size of serialized complete witness, for tx size est
 
     @property
@@ -1855,6 +1856,11 @@ class PartialTxInput(TxInput, PSBTSection):
         if desc := self.script_descriptor:
             return desc.is_taproot()
         return self._is_taproot
+    def is_silentpayment(self) -> bool:
+        if self._is_taproot is None:
+            if self.address:
+                self._is_silentPayment = bitcoin.is_silentpayment_address(self.address)
+        return self._is_silentPayment
 
     def already_has_some_signatures(self) -> bool:
         """Returns whether progress has been made towards completing this input."""

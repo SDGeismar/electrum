@@ -30,6 +30,7 @@ from enum import IntEnum, Enum
 import electrum_ecc as ecc
 from electrum_ecc.util import bip340_tagged_hash
 
+from .segwit_addr import bech32_decode
 from .util import bfh, BitcoinException, assert_bytes, to_bytes, inv_dict, is_hex_str, classproperty
 from . import segwit_addr
 from . import constants
@@ -448,6 +449,9 @@ def address_to_script(addr: str, *, net=None) -> bytes:
         if not (0 <= witver <= 16):
             raise BitcoinException(f'impossible witness version: {witver}')
         return construct_script([witver, bytes(witprog)])
+    bscan, bspend = decode_silent_payment_addr(net=net,address=addr)
+    if bspend is not None:
+        return b'assadasdsadsajnjsankj'
     addrtype, hash_160_ = b58_address_to_hash160(addr)
     if addrtype == net.ADDRTYPE_P2PKH:
         script = pubkeyhash_to_p2pkh_script(hash_160_)
@@ -710,6 +714,15 @@ def is_taproot_address(addr: str, *, net=None) -> bool:
         return False
     return witver == 1
 
+def is_silentpayment_address(addr: str, *, net=None) -> bool:
+    if net is None: net = constants.net
+    try:
+        if bech32_decode(addr, ignore_long_length=True).hrp != net.BIP352_HRP:
+            return False
+        decode_silent_payment_addr(addr, net=net)
+    except Exception as e:
+        return False
+    return True
 
 def is_b58_address(addr: str, *, net=None) -> bool:
     if net is None: net = constants.net
@@ -725,7 +738,8 @@ def is_b58_address(addr: str, *, net=None) -> bool:
 
 def is_address(addr: str, *, net=None) -> bool:
     return is_segwit_address(addr, net=net) \
-           or is_b58_address(addr, net=net)
+           or is_b58_address(addr, net=net) \
+           or is_silentpayment_address(addr,net=net)
 
 
 def is_private_key(key: str, *, raise_on_error=False) -> bool:
@@ -900,30 +914,11 @@ def verify_usermessage_with_address(address: str, sig65: bytes, message: bytes, 
 ####### silent payments (bip-352) #######
 
 
-def decode_silent_payment_addr(address: str, hrp: str = "tsp"):
-    _, data = decode(hrp, address)
+def decode_silent_payment_addr(address: str, *, net=None):
+    _, data = segwit_addr.decode_segwit_address(net.BIP352_HRP,address,ignore_long_length=True)
     if data is None:
         return ecc.ECPubkey(None), ecc.ECPubkey(None) # what to return here? This returns basically two ecc.POINT_AT_INFINITY. Maybe just return None?
     data_bytes = bytes(data)
     B_scan = ecc.ECPubkey(data_bytes[:33])
     B_spend = ecc.ECPubkey(data_bytes[33:])
     return B_scan, B_spend
-
-# method in segwit_addr.decode_segwit_address does kind of the same, but has length restrictions. I got this from bip-reference
-def decode(hrp, addr):
-    """Decode a segwit address."""
-    #hrpgot, data, spec = bech32_decode(addr, ignore_long_length=True)
-    dec: segwit_addr.DecodedBech32 = segwit_addr.bech32_decode(addr, ignore_long_length=True) # this differs slightly from reference
-    hrpgot = dec.hrp
-    data = dec.data
-    if hrpgot != hrp:
-        print(f"{hrpgot=} != {hrp=}")
-        return (None, None)
-    decoded = segwit_addr.convertbits(data[1:], 5, 8, False)
-    if decoded is None or len(decoded) < 2:
-        print("decoded is None or len(decoded) < 2")
-        return (None, None)
-    if data[0] > 16:
-        print("data[0] > 16")
-        return (None, None)
-    return (data[0], decoded)
