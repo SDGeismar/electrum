@@ -2051,6 +2051,12 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         tx.rbf_merge_txid = rbf_merge_txid
         tx.add_info_from_wallet(self)
         run_hook('make_unsigned_transaction', self, tx)
+
+        # DEV: Inject custom silent payment logic for prototyping
+        if any([hasattr(o, "sp_address") for o in tx.outputs()]):
+            from .silent_payment import process_silent_payment_tx
+            process_silent_payment_tx(wallet=self, tx=tx)
+
         return tx
 
     def is_frozen_address(self, addr: str) -> bool:

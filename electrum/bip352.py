@@ -13,12 +13,12 @@ class SilentPaymentAddress:
     """
         Takes a silent payment address and decodes into keys
     """
-    B_Spend: str
-    B_Scan: str
+    B_Spend: ecc.ECPubkey
+    B_Scan: ecc.ECPubkey
     address: str
-    def __init__(self, address: str):
+    def __init__(self, address: str, hrp: str = "tsp"):
         self.address = address
-        self.B_Scan, self.B_Spend = decode_silent_payment_addr(address)
+        self.B_Scan, self.B_Spend = decode_silent_payment_addr(address, hrp)
 
 def create_outputs():
     """
@@ -40,7 +40,7 @@ def create_outputs():
         silent payment recipients.
 
 
-    
+
     """
     pass
 
@@ -87,7 +87,7 @@ def handle_silent_payment(wallet: Abstract_Wallet):
     A_sum = privkey1 + privkey2
 
     print(f"privSum without modulo  : {a_sum}")
-    print(f"privSum with modulo     : {a_sum % ecc.CURVE_ORDER}") 
+    print(f"privSum with modulo     : {a_sum % ecc.CURVE_ORDER}")
     print(f"pubSum direct addition  : {A_sum.get_public_key_hex()}")
     print(f"pub generated from a_sum: {ecc.ECPrivkey(int.to_bytes(a_sum % ecc.CURVE_ORDER, length=32, byteorder='big', signed=False)).get_public_key_hex()}")
     print(f"from ref                : 02726d16f99a6efe1f9a7ab6c7d1143ad1b52957f84fd5d16414982c7b293c3871")
@@ -99,7 +99,7 @@ def handle_silent_payment(wallet: Abstract_Wallet):
     lowest_outpoint = sorted([outpoint1_bytes, outpoint2_bytes])[0]
 
     input_hash = bip340_tagged_hash(b"BIP0352/Inputs", lowest_outpoint + A_sum.get_public_key_bytes())
-    print(f"input hash              : {input_hash.hex()}")    
+    print(f"input hash              : {input_hash.hex()}")
 
     ecdh_shared_secret_a_sum = ecc.string_to_number(input_hash) * (a_sum % ecc.CURVE_ORDER) * B_scan
     ecdh_shared_secret_A_sum = ecc.string_to_number(input_hash) * A_sum * ecc.ECPrivkey(bytes.fromhex(b_scan_raw)).secret_scalar
@@ -139,22 +139,22 @@ def handle_silent_payment(wallet: Abstract_Wallet):
 
     # get all utxo in wallet
     coins: Sequence[PartialTxInput] = wallet.get_spendable_coins(confirmed_only=False)
-    # 500000 sats -> 
-    # 25315  sats -> 
+    # 500000 sats ->
+    # 25315  sats ->
     # choose output value to ensure both outputs are picket efficiently: 0.26
     coins = [c for c in coins if c.address != "tb1qq97yh8pwyem26lkqk9zr6syfa5vftnqa4zkjzt"]
     # add more info, since some fields are not filled otherwise
     for c in coins:
         wallet.add_input_info(c)
         print(c.to_json())
-    
+
     # we need the prevouts (outpoints) of the inputs
     # this is done to prevent address reuse, since every txid is unique
     prevouts_ser = [c.prevout.serialize_to_network() for c in coins]
     # we only need the lowest prevout
     lowest_prevout = sorted(prevouts_ser)[0]
     #print(f"1: {hex(int.from_bytes(prevouts_ser[0]))}\n2: {hex(int.from_bytes(prevouts_ser[1]))}\nlowest: {hex(int.from_bytes(lowest_prevout))}")
-    
+
     # We also need all input private keys of the valid inputs for shared secret derivation (all are p2wpkh here -> valid)
     privkeys: list[int] = []
     # This again works only with Deterministic wallets, logic has to be adapted for imported wallets
@@ -174,7 +174,7 @@ def handle_silent_payment(wallet: Abstract_Wallet):
     priv_sum_bytes = int.to_bytes(priv_sum, length=32, byteorder='big', signed=False)
     # sum of corresponding public keys. This also checks internally if priv_sum_bytes is valid
     a_sum = ecc.ECPrivkey(priv_sum_bytes)
-    
+
     # It is somehow not clear from the BIP, if we should use x_only for A_Sum. In the reference, compressed format is used.
     input_hash = bip340_tagged_hash(b"BIP0352/Inputs", lowest_prevout + a_sum.get_public_key_bytes())
 
@@ -187,12 +187,12 @@ def handle_silent_payment(wallet: Abstract_Wallet):
     k = 0 # this would incremented for multiple groups and/or labels within groups
     t_k = bip340_tagged_hash(b"BIP0352/SharedSecret", ecdh_shared_secret.get_public_key_bytes() + k.to_bytes(4, "big")) # why t_k?
     output_pubkey = B_spend + ((ecc.string_to_number(t_k) % ecc.CURVE_ORDER) * ecc.GENERATOR)
-    
+
 
     spk = (b'\x51\x20' + output_pubkey.get_public_key_bytes()[1:])
     output_addr = script_to_address(spk)
     print(f"final addr: {output_addr}")
-    
+
 
 def decode_silent_payment_addr(address: str, hrp: str = "tsp"):
     _, data = decode(hrp, address)
