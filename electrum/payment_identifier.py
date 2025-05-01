@@ -7,6 +7,7 @@ from enum import IntEnum
 from typing import NamedTuple, Optional, Callable, List, TYPE_CHECKING, Tuple, Union
 
 from . import bitcoin
+from .bip352 import SilentPaymentAddress
 from .contacts import AliasNotFoundException
 from .i18n import _
 from .invoices import Invoice
@@ -483,18 +484,20 @@ class PaymentIdentifier(Logger):
         else:
             raise Exception('not onchain')
 
-    def _parse_as_multiline(self, text: str):
+    def _parse_as_multiline(self, text: str) -> List[PartialTxOutput]:
         # filter out empty lines
         lines = text.split('\n')
         lines = [i for i in lines if i]
         is_multiline = len(lines) > 1
-        outputs = []  # type: List[PartialTxOutput]
+        outputs : List[PartialTxOutput] = []
         errors = ''
         total = 0
         self._is_max = False
         for i, line in enumerate(lines):
             try:
                 output = self.parse_address_and_amount(line)
+                if output.scriptpubkey == bytes(34):
+                    output.sp_addr = SilentPaymentAddress(line.split(',')[0])
                 outputs.append(output)
                 if parse_max_spend(output.value):
                     self._is_max = True
@@ -522,6 +525,8 @@ class PaymentIdentifier(Logger):
     def parse_output(self, x: str) -> Tuple[Optional[bytes], bool]:
         try:
             address = self.parse_address(x)
+            if(bitcoin.is_silentpayment_address(address)):
+                return bytes(34), True
             return bitcoin.address_to_script(address), True
         except Exception as e:
             pass

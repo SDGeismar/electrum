@@ -1882,6 +1882,7 @@ class PartialTxOutput(TxOutput, PSBTSection):
         self.is_mine = False  # type: bool  # whether the wallet considers the output to be ismine
         self.is_change = False  # type: bool  # whether the wallet considers the output to be change
         self.is_utxo_reserve = False  # type: bool  # whether this is a change output added to satisfy anchor channel requirements
+        self.sp_addr = None # type: str # if not None indicates that this is a silent payment and will be changed in the wallet
 
     @property
     def pubkeys(self) -> Set[bytes]:

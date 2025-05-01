@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (QLabel, QVBoxLayout, QGridLayout, QHBoxLayout,
 
 from electrum.i18n import _
 from electrum.logging import Logger
-from electrum.bitcoin import DummyAddress
+from electrum.bitcoin import DummyAddress,is_silentpayment_address
 from electrum.plugin import run_hook
 from electrum.util import NotEnoughFunds, NoDynamicFeeEstimates, parse_max_spend, UserCancelled
 from electrum.invoices import PR_PAID, Invoice, PR_BROADCASTING, PR_BROADCAST
@@ -27,6 +27,7 @@ from .paytoedit import InvalidPaymentIdentifier
 from .util import (WaitingDialog, HelpLabel, MessageBoxMixin, EnterButton, char_width_in_lineedit,
                    get_iconname_camera, read_QIcon, ColorScheme, IconLabel, Spinner)
 from .invoice_list import InvoiceList
+from ...bip352 import SilentPaymentAddress
 
 if TYPE_CHECKING:
     from .main_window import ElectrumWindow
@@ -157,13 +158,7 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
         #buttons1.addStretch(1)
         #grid.addLayout(buttons1, 0, 1, 1, 4)
 
-        ### CUT THIS LATER
-        from electrum.bip352 import handle_silent_payment
-        self.dummy_button = EnterButton("Run Silent Test", lambda: handle_silent_payment(self.wallet)) 
-        ###
-
         buttons = QHBoxLayout()
-        buttons.addWidget(self.dummy_button) ### CUT THIS ALSO
         buttons.addWidget(self.paste_button)
         buttons.addWidget(self.clear_button)
         buttons.addStretch(1)
@@ -576,6 +571,10 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
                         on_finished=self.finalize_done_signal.emit)
             return
         self.pending_invoice = self.read_invoice()
+        for  o in self.pending_invoice.outputs:
+            if o.scriptpubkey == bytes(34):
+                if o.sp_addr == None:
+                    o.sp_addr = SilentPaymentAddress(pi.text)
         if not self.pending_invoice:
             return
         self.do_pay_invoice(self.pending_invoice)

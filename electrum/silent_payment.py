@@ -25,7 +25,7 @@ def process_silent_payment_tx(wallet: Abstract_Wallet, tx: PartialTransaction):
     assert wallet.txin_type in SP_ELIGIBLE_INPUT_TYPES, f"Wallet txin-type must be one of {SP_ELIGIBLE_INPUT_TYPES}, not {wallet.txin_type}"
     #TODO: Check witness version <= 1 (although not really possible to happen when all inputs come from this wallet)
 
-    sp_dummy_outputs = [out for out in tx.outputs() if hasattr(out, "sp_addr")]
+    sp_dummy_outputs = [out for out in tx.outputs() if out.sp_addr != None]
 
     outpoints = [txin.prevout for txin in tx.inputs()]
 
