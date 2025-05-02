@@ -574,12 +574,12 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
         for  o in self.pending_invoice.outputs:
             if o.scriptpubkey == bytes(34):
                 if o.sp_addr == None:
-                    if(pi.type == PaymentIdentifierType.BIP21):
-                        o.sp_addr = SilentPaymentAddress(pi.bip21['address'])
-                    elif(pi.type == PaymentIdentifierType.BIP70):
-                        pass
-                    else:
+                    if(pi.type == PaymentIdentifierType.SPK):
                         o.sp_addr = SilentPaymentAddress(pi.text)
+                    elif(pi.type == PaymentIdentifierType.BIP21):
+                        o.sp_addr = SilentPaymentAddress(pi.bip21['address'])
+                    else:
+                        pass
         if not self.pending_invoice:
             return
         self.do_pay_invoice(self.pending_invoice)
