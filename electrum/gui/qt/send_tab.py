@@ -159,7 +159,7 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
 
         ### CUT THIS LATER
         from electrum.bip352 import handle_silent_payment
-        self.dummy_button = EnterButton("Run Silent Test", lambda: handle_silent_payment(self.wallet)) 
+        self.dummy_button = EnterButton("Run Silent Test", lambda: handle_silent_payment(self.wallet))
         ###
 
         buttons = QHBoxLayout()

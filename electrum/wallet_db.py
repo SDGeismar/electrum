@@ -1663,6 +1663,8 @@ class WalletDB(JsonDB):
         # TODO make all these private
         # txid -> address -> prev_outpoint -> value
         self.txi = self.get_dict('txi')                          # type: Dict[str, Dict[str, Dict[str, int]]]
+        # Dict[str, Dict[str, str]] txid -> (tr_addr -> sp_addr)
+        self.sp_addresses = self.get_dict('sp_addresses')
         # txid -> address -> output_index -> (value, is_coinbase)
         self.txo = self.get_dict('txo')                          # type: Dict[str, Dict[str, Dict[str, Tuple[int, bool]]]]
         self.transactions = self.get_dict('transactions')        # type: Dict[str, Transaction]

@@ -1,14 +1,19 @@
+from collections import defaultdict
+
 from electrum_ecc import ECPubkey, ECPrivkey
 from electrum_ecc.util import bip340_tagged_hash
 
-from .wallet import Abstract_Wallet
-from .transaction import PartialTransaction, PartialTxInput, TxOutpoint, PartialTxOutput
-from .bip352 import SilentPaymentAddress
+from . import segwit_addr, constants
+from .crypto import sha256
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .transaction import PartialTransaction, TxOutpoint, PartialTxOutput
 import electrum_ecc as ecc
 """
     TODO: Get smarter in which cases the input-set could change and find ways to deal with it accordingly.
           - PSBT can be exported/imported.
           - Replace By Fee (RBF): Should either be disallowed when having sp_addresses in tx or shared secrets have to be recalculated.
+          - For RBF, see transaction.py[1139]
     TODO: Make final decision about the scope in which we enable silent payments.
           So far, I didn't find a scenario where either standard single-sig or imported single-sig Wallets list
           utxo's of type other than "p2pkh", "p2sh-p2wpkh", "p2wpkh". Therefore, both would be sp-eligible.
@@ -18,14 +23,38 @@ import electrum_ecc as ecc
 
 SP_ELIGIBLE_INPUT_TYPES = ["p2pkh", "p2sh-p2wpkh", "p2wpkh", "p2tr"] # p2tr is just included for consistency with the bip. Electrum doesn't support spending tr yet.
 
-def process_silent_payment_tx(wallet: Abstract_Wallet, tx: PartialTransaction):
+SILENT_PAYMENT_DUMMY_SPK = bytes(2) + sha256("SilentPaymentDummySpk") # match length of taproot output script
+
+
+class SilentPaymentAddress:
+    """
+        Takes a silent payment address and decodes into keys
+    """
+    def __init__(self, address: str, *, net=None):
+        if net is None: net = constants.net
+        self._encoded = address
+        self._B_Scan, self._B_Spend = _decode_silent_payment_addr(net.BIP352_HRP, address)
+
+    @property
+    def encoded(self) -> str:
+        return self._encoded
+
+    @property
+    def B_Scan(self) -> ecc.ECPubkey:
+        return self._B_Scan
+
+    @property
+    def B_Spend(self) -> ecc.ECPubkey:
+        return self._B_Spend
+
+def process_silent_payment_tx(wallet, tx: 'PartialTransaction'):
     assert wallet is not None, "Can't proceed silent payment with missing wallet"
     assert tx is not None, "Can't proceed silent payment with missing tx"
     assert wallet.wallet_type == "standard", "Only standard wallets are supported for silent payment"
     assert wallet.txin_type in SP_ELIGIBLE_INPUT_TYPES, f"Wallet txin-type must be one of {SP_ELIGIBLE_INPUT_TYPES}, not {wallet.txin_type}"
     #TODO: Check witness version <= 1 (although not really possible to happen when all inputs come from this wallet)
 
-    sp_dummy_outputs = [out for out in tx.outputs() if hasattr(out, "sp_addr")]
+    sp_dummy_outputs = [out for out in tx.outputs() if out.is_silent_payment()]
 
     outpoints = [txin.prevout for txin in tx.inputs()]
 
@@ -40,7 +69,8 @@ def process_silent_payment_tx(wallet: Abstract_Wallet, tx: PartialTransaction):
     # Isolate core logic to allow efficient testing
     _derive_sp_outputs(input_privkeys, outpoints, sp_dummy_outputs)
 
-def _derive_sp_outputs(input_privkeys: list[ECPrivkey], outpoints: list[TxOutpoint], sp_dummy_outputs: list[PartialTxOutput]):
+
+def _derive_sp_outputs(input_privkeys: list[ECPrivkey], outpoints: list['TxOutpoint'], sp_dummy_outputs: list['PartialTxOutput']):
     """
         Derives the final output public keys for silent payment recipients and updates the corresponding dummy spk with the correct spk.
         Args:
@@ -62,7 +92,7 @@ def _derive_sp_outputs(input_privkeys: list[ECPrivkey], outpoints: list[TxOutpoi
     input_hash = bip340_tagged_hash(b"BIP0352/Inputs", lowest_outpoint + A_sum.get_public_key_bytes())
 
     # create a tuple as value so a link between the recipient and the spk in the output can be made
-    silent_payment_groups: dict[ECPubkey, list[tuple[ECPubkey, PartialTxOutput]]] = {}
+    silent_payment_groups: dict[ECPubkey, list[tuple[ECPubkey, 'PartialTxOutput']]] = {}
 
     for sp_dummy_output in sp_dummy_outputs:
         recipient: SilentPaymentAddress = sp_dummy_output.sp_addr
@@ -83,5 +113,42 @@ def _derive_sp_outputs(input_privkeys: list[ECPrivkey], outpoints: list[TxOutpoi
             # Like this we make sure, the generated spk's belong to the correct amount entered by the user
             output.scriptpubkey = (b'\x51\x20' + P_km.get_public_key_bytes()[1:])
             k += 1
+
+def is_silent_payment_address(addr: str, *, net=None) -> bool:
+    if net is None: net = constants.net
+    try:
+        _decode_silent_payment_addr(net.BIP352_HRP, addr)
+        return True
+    except Exception:
+        return False
+
+def _decode_silent_payment_addr(hrp: str, address: str) -> tuple[ecc.ECPubkey, ecc.ECPubkey]:
+    """Decodes a Silent Payment address (version 0 only) and returns (B_scan, B_spend) pubkeys."""
+    dec = segwit_addr.bech32_decode(address, ignore_long_length=True)
+    if dec.hrp != hrp or dec.data is None:
+        raise ValueError(f"Invalid HRP or malformed silent payment address: {address}")
+
+    version = dec.data[0]
+    decoded = segwit_addr.convertbits(dec.data[1:], 5, 8, False)
+    if decoded is None:
+        raise ValueError("Bech32 conversion failed")
+
+    if version == 0:
+        if len(decoded) != 66:
+            raise ValueError("Silent payment v0 must contain exactly 66 bytes")
+    elif 1 <= version <= 30:
+        raise NotImplementedError(f"Silent payment version {version} not yet supported")
+    elif version == 31:
+        raise ValueError("Silent payment version 31 is reserved and invalid")
+    else:
+        raise ValueError(f"Unknown silent payment version: {version}")
+
+    try:
+        B_scan = ecc.ECPubkey(bytes(decoded[:33]))
+        B_spend = ecc.ECPubkey(bytes(decoded[33:]))
+    except Exception as e:
+        raise ValueError(f"Invalid public key(s) in silent payment address: {e}")
+
+    return B_scan, B_spend
 
 

@@ -222,7 +222,6 @@ class PayToEdit(QWidget, Logger, GenericInputHandler):
         if self.payment_identifier and self.payment_identifier.text == text:
             # no change.
             return
-
         self.payment_identifier = PaymentIdentifier(self.send_tab.wallet, text)
 
         # toggle to multiline if payment identifier is a multiline

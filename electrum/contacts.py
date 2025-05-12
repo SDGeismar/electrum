@@ -32,6 +32,7 @@ from . import dnssec
 from .util import read_json_file, write_json_file, to_string
 from .logging import Logger, get_logger
 from .util import trigger_callback
+from .silent_payment import is_silent_payment_address
 
 if TYPE_CHECKING:
     from .wallet_db import WalletDB
@@ -85,7 +86,7 @@ class Contacts(dict, Logger):
             return res
 
     def resolve(self, k):
-        if bitcoin.is_address(k):
+        if bitcoin.is_address(k) or is_silent_payment_address(k):
             return {
                 'address': k,
                 'type': 'address'

@@ -99,6 +99,7 @@ from .qrreader import scan_qrcode
 from .swap_dialog import SwapDialog, InvalidSwapParameters
 from .balance_dialog import (BalanceToolButton, COLOR_FROZEN, COLOR_UNMATURED, COLOR_UNCONFIRMED, COLOR_CONFIRMED,
                              COLOR_LIGHTNING, COLOR_FROZEN_LIGHTNING)
+from electrum.silent_payment import is_silent_payment_address
 
 if TYPE_CHECKING:
     from . import ElectrumGui
@@ -1553,7 +1554,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger, QtEventListener):
         self.send_tab.payto_contacts(labels)
 
     def set_contact(self, label, address):
-        if not is_address(address):
+        if not is_address(address) and not is_silent_payment_address(address):
             self.show_error(_('Invalid Address'))
             self.contact_list.update()  # Displays original unchanged value
             return False

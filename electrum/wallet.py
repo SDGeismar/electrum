@@ -2053,9 +2053,12 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         run_hook('make_unsigned_transaction', self, tx)
 
         # DEV: Inject custom silent payment logic for prototyping
-        if any([hasattr(o, "sp_address") for o in tx.outputs()]):
+        if any(o.is_silent_payment() for o in tx.outputs()):
             from .silent_payment import process_silent_payment_tx
+            self.logger.debug(f'silent payment tx with outputs before{tx.outputs()}')
             process_silent_payment_tx(wallet=self, tx=tx)
+            self.logger.debug(f'silent payment tx with outputs after{tx.outputs()}')
+            tx.set_rbf(False) # Transaction should be final
 
         return tx
 

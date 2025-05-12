@@ -64,6 +64,7 @@ if TYPE_CHECKING:
     from .wallet import Abstract_Wallet
     from .network import Network
     from .simple_config import SimpleConfig
+    from .silent_payment import SilentPaymentAddress
 
 
 _logger = get_logger(__name__)
@@ -1876,6 +1877,8 @@ class PartialTxOutput(TxOutput, PSBTSection):
         self.is_mine = False  # type: bool  # whether the wallet considers the output to be ismine
         self.is_change = False  # type: bool  # whether the wallet considers the output to be change
         self.is_utxo_reserve = False  # type: bool  # whether this is a change output added to satisfy anchor channel requirements
+        self.sp_addr = None # type: Optional[SilentPaymentAddress] # if set, this output is a silent payment
+        #TODO: Should sp_addr be stored in TxOutput instead? Also, find out how to resolve import Errors
 
     @property
     def pubkeys(self) -> Set[bytes]:
@@ -1896,6 +1899,9 @@ class PartialTxOutput(TxOutput, PSBTSection):
             if self.witness_script is None:
                 self.witness_script = desc.expand().witness_script
 
+    def is_silent_payment(self):
+        return self.sp_addr is not None
+
     def to_json(self):
         d = super().to_json()
         d.update({
@@ -1907,6 +1913,9 @@ class PartialTxOutput(TxOutput, PSBTSection):
             'unknown_psbt_fields': {key.hex(): val.hex() for key, val in self._unknown.items()},
         })
         return d
+
+    def __repr__(self):
+        return super().__repr__() + (f"sp_addr={self.sp_addr.encoded}" if self.sp_addr else "")
 
     @classmethod
     def from_txout(cls, txout: TxOutput) -> 'PartialTxOutput':

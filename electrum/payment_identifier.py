@@ -20,6 +20,7 @@ from .lnaddr import LnInvoiceException
 from .lnutil import IncompatibleOrInsaneFeatures
 from .bip21 import parse_bip21_URI, InvalidBitcoinURI, LIGHTNING_URI_SCHEME, BITCOIN_BIP21_URI_SCHEME
 from . import paymentrequest
+from .silent_payment import is_silent_payment_address, SILENT_PAYMENT_DUMMY_SPK, SilentPaymentAddress
 
 if TYPE_CHECKING:
     from .wallet import Abstract_Wallet
@@ -469,17 +470,25 @@ class PaymentIdentifier(Logger):
                 on_finished(self)
 
     def get_onchain_outputs(self, amount):
-        if self.bip70:
+        if self.bip70: # TODO: Should this involve silent payments???
             return self.bip70_data.get_outputs()
         elif self.multiline_outputs:
             return self.multiline_outputs
         elif self.spk:
-            return [PartialTxOutput(scriptpubkey=self.spk, value=amount)]
+            output = PartialTxOutput(scriptpubkey=self.spk, value=amount)
+            if self.spk == SILENT_PAYMENT_DUMMY_SPK:
+                output.sp_addr = SilentPaymentAddress(self.text) #TODO: This can raise, but it should not be possible, how to deal with it?
+            return [output]
+            #return [PartialTxOutput(scriptpubkey=self.spk, value=amount)]
         elif self.bip21:
             address = self.bip21.get('address')
             scriptpubkey, is_address = self.parse_output(address)
             assert is_address  # unlikely, but make sure it is an address, not a script
-            return [PartialTxOutput(scriptpubkey=scriptpubkey, value=amount)]
+            output = PartialTxOutput(scriptpubkey=scriptpubkey, value=amount)
+            if scriptpubkey == SILENT_PAYMENT_DUMMY_SPK:
+                output.sp_addr = SilentPaymentAddress(address)
+            return [output]
+            #return [PartialTxOutput(scriptpubkey=scriptpubkey, value=amount)]
         else:
             raise Exception('not onchain')
 
@@ -517,7 +526,11 @@ class PaymentIdentifier(Logger):
         if not scriptpubkey:
             raise Exception('Invalid address')
         amount = self.parse_amount(y)
-        return PartialTxOutput(scriptpubkey=scriptpubkey, value=amount)
+        output = PartialTxOutput(scriptpubkey=scriptpubkey, value=amount)
+        if scriptpubkey == SILENT_PAYMENT_DUMMY_SPK:
+            output.sp_addr = SilentPaymentAddress(x) #TODO: This can raise, but it should not be possible, how to deal with it?
+        return output
+        #return PartialTxOutput(scriptpubkey=scriptpubkey, value=amount)
 
     def parse_output(self, x: str) -> Tuple[Optional[bytes], bool]:
         try:
@@ -531,7 +544,8 @@ class PaymentIdentifier(Logger):
             return script, False
         except Exception as e:
             pass
-
+        if is_silent_payment_address(x):
+            return SILENT_PAYMENT_DUMMY_SPK, True
         return None, False
 
     def parse_script(self, x: str) -> bytes:

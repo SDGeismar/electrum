@@ -1,24 +1,12 @@
 from typing import Sequence
-from .wallet import Abstract_Wallet
 from .transaction import PartialTxInput, TxOutpoint
 from .segwit_addr import bech32_decode, convertbits, DecodedBech32
 import electrum_ecc as ecc
 from electrum_ecc.util import bip340_tagged_hash
-from .bitcoin import taproot_output_script, script_to_address, address_to_script, taproot_tweak_pubkey, construct_script, decode_silent_payment_addr
+from .bitcoin import taproot_output_script, script_to_address, address_to_script, taproot_tweak_pubkey, construct_script
 
 # TODO: Check in bitcoin.py "DummyAddress" and what its used for. Maybe we find something useful for input selection with dummy addresses
 # TODO: Dive into plugins. e.g. wallet.make_unsigned_transaction runs a hook in the end. Maybe this would be a place to calculate the output addresses.
-
-class SilentPaymentAddress:
-    """
-        Takes a silent payment address and decodes into keys
-    """
-    B_Spend: ecc.ECPubkey
-    B_Scan: ecc.ECPubkey
-    address: str
-    def __init__(self, address: str, hrp: str = "tsp"):
-        self.address = address
-        self.B_Scan, self.B_Spend = decode_silent_payment_addr(address, hrp)
 
 def create_outputs():
     """
@@ -46,7 +34,7 @@ def create_outputs():
 
 
 
-def handle_silent_payment(wallet: Abstract_Wallet):
+def handle_silent_payment(wallet):
     test_addr = "tsp1qqw4j6kx8hd0leapusqcyx3gdq34az84gsjhxh82ka9y3yy09j4tvwq44ku34neq5w34xkfzplsdhs2aqsrkdxcvkcsjpm0290vfarx7dkg0nlyl8"
     test_addr1 = "tsp1qq0aut0j4rpngmjf55a6nr98h0kvlc2s83jwv8h9rmaqpgjqvc67wyqefkstjcfchzd9hpy84qara7dwu6jfpx2p9amjwg4j4hv3hsla8nvqa4ap0"
     to_silvio_addr = "tsp1qq0aut0j4rpngmjf55a6nr98h0kvlc2s83jwv8h9rmaqpgjqvc67wyqefkstjcfchzd9hpy84qara7dwu6jfpx2p9amjwg4j4hv3hsla8nvqa4ap0"
