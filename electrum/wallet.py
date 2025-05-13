@@ -512,6 +512,10 @@ class Abstract_Wallet(ABC, Logger, EventListener):
     def requires_unlock(self):
         return self.config.ENABLE_ANCHOR_CHANNELS and self.has_channels()
 
+    def can_send_silent_payment(self) -> bool:
+        """Whether this wallet type supports silent payments."""
+        return False
+
     def can_have_lightning(self) -> bool:
         """ whether this wallet can create new channels """
         # we want static_remotekey to be a wallet address
@@ -2054,10 +2058,9 @@ class Abstract_Wallet(ABC, Logger, EventListener):
 
         # DEV: Inject custom silent payment logic for prototyping
         if any(o.is_silent_payment() for o in tx.outputs()):
+            #Todo: Do we also check self.can_send_silent_payment here!?
             from .silent_payment import process_silent_payment_tx
-            self.logger.debug(f'silent payment tx with outputs before{tx.outputs()}')
             process_silent_payment_tx(wallet=self, tx=tx)
-            self.logger.debug(f'silent payment tx with outputs after{tx.outputs()}')
             tx.set_rbf(False) # Transaction should be final
 
         return tx
@@ -3987,6 +3990,9 @@ class Standard_Wallet(Simple_Wallet, Deterministic_Wallet):
     def add_slip_19_ownership_proofs_to_tx(self, tx: PartialTransaction) -> None:
         tx.add_info_from_wallet(self)
         self.keystore.add_slip_19_ownership_proofs_to_tx(tx=tx, password=None)
+
+    def can_send_silent_payment(self) -> bool:
+        return self.keystore.type == 'bip32' and not self.is_watching_only()
 
 
 class Multisig_Wallet(Deterministic_Wallet):

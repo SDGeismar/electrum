@@ -8,6 +8,7 @@ from .crypto import sha256
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .transaction import PartialTransaction, TxOutpoint, PartialTxOutput
+    from .wallet import Standard_Wallet
 import electrum_ecc as ecc
 """
     TODO: Get smarter in which cases the input-set could change and find ways to deal with it accordingly.
@@ -25,6 +26,7 @@ SP_ELIGIBLE_INPUT_TYPES = ["p2pkh", "p2sh-p2wpkh", "p2wpkh", "p2tr"] # p2tr is j
 
 SILENT_PAYMENT_DUMMY_SPK = bytes(2) + sha256("SilentPaymentDummySpk") # match length of taproot output script
 
+class SilentPaymentUnsupportedWalletException(Exception): pass
 
 class SilentPaymentAddress:
     """
@@ -47,23 +49,31 @@ class SilentPaymentAddress:
     def B_Spend(self) -> ecc.ECPubkey:
         return self._B_Spend
 
-def process_silent_payment_tx(wallet, tx: 'PartialTransaction'):
-    assert wallet is not None, "Can't proceed silent payment with missing wallet"
-    assert tx is not None, "Can't proceed silent payment with missing tx"
-    assert wallet.wallet_type == "standard", "Only standard wallets are supported for silent payment"
-    assert wallet.txin_type in SP_ELIGIBLE_INPUT_TYPES, f"Wallet txin-type must be one of {SP_ELIGIBLE_INPUT_TYPES}, not {wallet.txin_type}"
+def process_silent_payment_tx(wallet: 'Standard_Wallet', tx: 'PartialTransaction'):
+    # Todo: do we check if arguments are None?!?!
+    if True: raise SilentPaymentUnsupportedWalletException(f"silent payments are not supported in this wallet type: {wallet.wallet_type}")
+    if not wallet.can_send_silent_payment():
+        raise Exception(f"silent payments are not supported in this wallet type: {wallet.wallet_type}")
+    if not isinstance(tx, PartialTransaction):
+        raise ValueError("Expected partial transaction, not {type(tx)}")
+    for i in tx.inputs():
+        wallet.add_input_info(i) #Todo: this isn't necessary when called from make_unsigned transaction. Overhead?
+    if not all([i.is_mine for i in tx.inputs()]):
+        raise Exception("All inputs have to be is_mine to process silent payment")
+
     #TODO: Check witness version <= 1 (although not really possible to happen when all inputs come from this wallet)
 
     sp_dummy_outputs = [out for out in tx.outputs() if out.is_silent_payment()]
-
+    if not sp_dummy_outputs:
+        raise Exception("No silent payment outputs in tx")
     outpoints = [txin.prevout for txin in tx.inputs()]
 
     # Assumes that all inputs are eligible for shared secret derivation (all inputs are from this wallet only)
     input_privkeys = []
     for txin in tx.inputs():
         der_index = wallet.get_address_index(txin.address)
-        # TODO: How do we handle password?
-        privkey, _ = wallet.keystore.get_private_key(der_index, password=None)
+        privkey, compressed = wallet.keystore.get_private_key(der_index, password=None) #Todo: User gets prompted with pw when signing anyway, so can we just send none?
+        assert compressed, "found privkey for uncompressed pubkey"
         input_privkeys.append(ECPrivkey(privkey))
 
     # Isolate core logic to allow efficient testing
@@ -84,7 +94,8 @@ def _derive_sp_outputs(input_privkeys: list[ECPrivkey], outpoints: list['TxOutpo
 
     a_sum: int = sum([ecc.string_to_number(pk.get_secret_bytes()) for pk in input_privkeys]) % ecc.CURVE_ORDER
     # This edge-case extremely unlikely, but still has to be taken care of. How should error handling look like?
-    assert a_sum != 0, "Input private keys sum can't be zero"
+    if a_sum == 0:
+        raise Exception("Input private keys sum to zero, cannot derive shared secret") #TODO: Use Custom Exceptions?
 
     # electrum-ecc takes care of error handling in EC-Multiplication and we receive an assertion error if we sum to infinity
     A_sum: ECPubkey = a_sum * ecc.GENERATOR
