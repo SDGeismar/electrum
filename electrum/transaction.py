@@ -59,13 +59,12 @@ from .util import ShortID, OldTaskGroup
 from .bitcoin import DummyAddress
 from .descriptor import Descriptor, MissingSolutionPiece, create_dummy_descriptor_from_address
 from .json_db import stored_in
+from .silent_payment import SilentPaymentAddress, is_silent_payment_address, SILENT_PAYMENT_DUMMY_SPK
 
 if TYPE_CHECKING:
     from .wallet import Abstract_Wallet
     from .network import Network
     from .simple_config import SimpleConfig
-    from .silent_payment import SilentPaymentAddress
-
 
 _logger = get_logger(__name__)
 DEBUG_PSBT_PARSING = False
@@ -168,12 +167,17 @@ class TxOutput:
         return txout
 
     def to_legacy_tuple(self) -> Tuple[int, str, Union[int, str]]:
+        if self.is_silent_payment(): return TYPE_ADDRESS, self.sp_addr.encoded, self.value
         if self.address:
             return TYPE_ADDRESS, self.address, self.value
         return TYPE_SCRIPT, self.scriptpubkey.hex(), self.value
 
     @classmethod
     def from_legacy_tuple(cls, _type: int, addr: str, val: Union[int, str]) -> Union['TxOutput', 'PartialTxOutput']:
+        if is_silent_payment_address(addr):
+            out = cls(scriptpubkey=SILENT_PAYMENT_DUMMY_SPK, value=val)
+            out.sp_addr = SilentPaymentAddress(addr)
+            return out
         if _type == TYPE_ADDRESS:
             return cls.from_address_and_value(addr, val)
         if _type == TYPE_SCRIPT:

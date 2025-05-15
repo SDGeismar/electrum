@@ -2675,9 +2675,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
     def add_silent_payment_output_info(self, txout: TxOutput) -> None:
         address = txout.address
         if sp_addr := self.db.get_silent_payment_address(address): #check if silent payment
-            try: # This should never raise
-                txout.sp_addr = SilentPaymentAddress(sp_addr)
-            except Exception: pass
+            txout.sp_addr = SilentPaymentAddress(sp_addr)
 
     def add_output_info(self, txout: PartialTxOutput, *, only_der_suffix: bool = False) -> None:
         address = txout.address

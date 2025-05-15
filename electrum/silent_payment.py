@@ -1,4 +1,4 @@
-from collections import defaultdict
+from __future__ import annotations
 
 from electrum_ecc import ECPubkey, ECPrivkey
 from electrum_ecc.util import bip340_tagged_hash
@@ -49,12 +49,14 @@ class SilentPaymentAddress:
     def B_Spend(self) -> ecc.ECPubkey:
         return self._B_Spend
 
-def process_silent_payment_tx(wallet: 'Standard_Wallet', tx: 'PartialTransaction'):
+def process_silent_payment_tx(wallet: Standard_Wallet, tx: PartialTransaction):
+    #from .wallet import Standard_Wallet
+    assert isinstance(wallet, Standard_Wallet)
     # Todo: do we check if arguments are None?!?!
     if not wallet.can_send_silent_payment():
         raise Exception(f"silent payments are not supported in this wallet type: {wallet.wallet_type}")
     if tx is None: #if not isinstance(tx, PartialTransaction): #Todo How to deal with circular imports???
-        raise ValueError("Expected partial transaction, not {type(tx)}")
+        raise ValueError(f"Expected partial transaction, not {type(tx)}")
     for i in tx.inputs():
         wallet.add_input_info(i) #Todo: this isn't necessary when called from make_unsigned transaction. Overhead?
     if not all([i.is_mine for i in tx.inputs()]):
