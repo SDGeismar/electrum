@@ -51,10 +51,9 @@ class SilentPaymentAddress:
 
 def process_silent_payment_tx(wallet: 'Standard_Wallet', tx: 'PartialTransaction'):
     # Todo: do we check if arguments are None?!?!
-    if True: raise SilentPaymentUnsupportedWalletException(f"silent payments are not supported in this wallet type: {wallet.wallet_type}")
     if not wallet.can_send_silent_payment():
         raise Exception(f"silent payments are not supported in this wallet type: {wallet.wallet_type}")
-    if not isinstance(tx, PartialTransaction):
+    if tx is None: #if not isinstance(tx, PartialTransaction): #Todo How to deal with circular imports???
         raise ValueError("Expected partial transaction, not {type(tx)}")
     for i in tx.inputs():
         wallet.add_input_info(i) #Todo: this isn't necessary when called from make_unsigned transaction. Overhead?

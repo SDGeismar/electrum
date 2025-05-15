@@ -1471,6 +1471,22 @@ class WalletDB(JsonDB):
     def get_history(self) -> Sequence[str]:
         return list(self.history.keys())
 
+    @locked
+    def get_silent_payment_address(self, onchain_addr: str) -> Optional[str]:
+        if onchain_addr is None: return None
+        return self.sp_addresses.get(onchain_addr, None)
+
+    @modifier
+    def add_silent_payment_address(self, onchain_addr: str, silent_payment_addr) -> None:
+        assert isinstance(onchain_addr, str)
+        assert isinstance(silent_payment_addr, str)
+        self.sp_addresses[onchain_addr] = silent_payment_addr
+
+    @modifier
+    def remove_silent_payment_address(self, onchain_addr: str) -> None:
+        assert isinstance(onchain_addr, str)
+        self.sp_addresses.pop(onchain_addr, None)
+
     def is_addr_in_history(self, addr: str) -> bool:
         # does not mean history is non-empty!
         assert isinstance(addr, str)
@@ -1663,8 +1679,8 @@ class WalletDB(JsonDB):
         # TODO make all these private
         # txid -> address -> prev_outpoint -> value
         self.txi = self.get_dict('txi')                          # type: Dict[str, Dict[str, Dict[str, int]]]
-        # Dict[str, Dict[str, str]] txid -> (tr_addr -> sp_addr)
-        self.sp_addresses = self.get_dict('sp_addresses')
+        # taproot_addr -> sp_addr)
+        self.sp_addresses = self.get_dict('sp_addresses')        # type: Dict[str, str]
         # txid -> address -> output_index -> (value, is_coinbase)
         self.txo = self.get_dict('txo')                          # type: Dict[str, Dict[str, Dict[str, Tuple[int, bool]]]]
         self.transactions = self.get_dict('transactions')        # type: Dict[str, Transaction]

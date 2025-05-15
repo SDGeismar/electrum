@@ -48,6 +48,7 @@ from .i18n import _
 from .bip32 import BIP32Node, convert_bip32_intpath_to_strpath, convert_bip32_strpath_to_intpath
 from . import util
 from .lntransport import extract_nodeid
+from .silent_payment import SilentPaymentAddress
 from .util import (
     NotEnoughFunds, UserCancelled, profiler, OldTaskGroup, format_fee_satoshis,
     WalletFileException, BitcoinException, InvalidPassword, format_time, timestamp_to_datetime,
@@ -2060,8 +2061,11 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         if any(o.is_silent_payment() for o in tx.outputs()):
             #Todo: Do we also check self.can_send_silent_payment here!?
             from .silent_payment import process_silent_payment_tx
+            self.logger.debug("PROCESSING SILENT PAYMENT")
             process_silent_payment_tx(wallet=self, tx=tx)
+            self.logger.debug(f"Setting RBF before: {tx.is_rbf_enabled()}, {[hex(txin.nsequence) for txin in tx.inputs()]}")
             tx.set_rbf(False) # Transaction should be final
+            self.logger.debug(f"Setting RBF after: {tx.is_rbf_enabled()}, {[hex(txin.nsequence) for txin in tx.inputs()]}")
 
         return tx
 
@@ -2668,8 +2672,16 @@ class Abstract_Wallet(ABC, Logger, EventListener):
                     return True
         return False
 
+    def add_silent_payment_output_info(self, txout: TxOutput) -> None:
+        address = txout.address
+        if sp_addr := self.db.get_silent_payment_address(address): #check if silent payment
+            try: # This should never raise
+                txout.sp_addr = SilentPaymentAddress(sp_addr)
+            except Exception: pass
+
     def add_output_info(self, txout: PartialTxOutput, *, only_der_suffix: bool = False) -> None:
         address = txout.address
+        self.add_silent_payment_output_info(txout)
         if not self.is_mine(address):
             is_mine = self._learn_derivation_path_for_address_from_txinout(txout, address)
             if not is_mine:

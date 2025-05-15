@@ -2765,6 +2765,9 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger, QtEventListener):
             win.show_error(e)
             return False
         else:
+            for output in tx.outputs():
+                if output.is_silent_payment():
+                    self.wallet.db.add_silent_payment_address(output.address, output.sp_addr.encoded)
             self.wallet.save_db()
             # need to update at least: history_list, utxo_list, address_list
             self.need_update.set()

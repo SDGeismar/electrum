@@ -45,7 +45,7 @@ from electrum import bitcoin
 from electrum.bitcoin import NLOCKTIME_BLOCKHEIGHT_MAX, DummyAddress
 from electrum.i18n import _
 from electrum.plugin import run_hook
-from electrum.transaction import SerializationError, Transaction, PartialTransaction, TxOutpoint, TxinDataFetchProgress
+from electrum.transaction import SerializationError, Transaction, PartialTransaction, TxOutpoint, TxinDataFetchProgress, PartialTxOutput
 from electrum.logging import get_logger
 from electrum.util import ShortID, get_asyncio_loop, UI_UNIT_NAME_TXSIZE_VBYTES
 from electrum.network import Network
@@ -60,6 +60,7 @@ from .util import (MessageBoxMixin, read_QIcon, Buttons, icon_path,
                    get_iconname_qrcode, VLine, WaitingDialog)
 from .rate_limiter import rate_limited
 from .my_treeview import create_toolbar_with_menu, QMenuWithConfig
+from ...lnutil import received_htlc_trim_threshold_sat
 
 if TYPE_CHECKING:
     from .main_window import ElectrumWindow
@@ -136,6 +137,9 @@ class TxInOutWidget(QWidget):
             legend=_("TrustedCoin (2FA) batch fee"), color=ColorScheme.BLUE, tooltip=_("TrustedCoin (2FA) fee for the next batch of transactions"))
         self.txo_color_swap = TxOutputColoring(
             legend=_("Submarine swap address"), color=ColorScheme.BLUE, tooltip=_("Submarine swap address"))
+        self.txo_color_silent_payment = TxOutputColoring(
+            legend=_("Silent Payment"), color=ColorScheme.ORANGE, tooltip=_("Silent Payment")
+        )
         self.outputs_header = QLabel()
         self.outputs_textedit = QTextBrowserWithDefaultSize(750, 100)
         self.outputs_textedit.setOpenLinks(False)  # disable automatic link opening
@@ -153,6 +157,7 @@ class TxInOutWidget(QWidget):
         outheader_hbox.addWidget(self.txo_color_change.legend_label)
         outheader_hbox.addWidget(self.txo_color_2fa.legend_label)
         outheader_hbox.addWidget(self.txo_color_swap.legend_label)
+        outheader_hbox.addWidget(self.txo_color_silent_payment.legend_label)
 
         vbox = QVBoxLayout()
         vbox.addLayout(self.inheader_hbox)
@@ -178,10 +183,10 @@ class TxInOutWidget(QWidget):
         lnk.setToolTip(_('Click to open, right-click for menu'))
         lnk.setAnchor(True)
         lnk.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SingleUnderline)
-        tf_used_recv, tf_used_change, tf_used_2fa, tf_used_swap = False, False, False, False
+        tf_used_recv, tf_used_change, tf_used_2fa, tf_used_swap, tf_used_sp = False, False, False, False, False
 
-        def addr_text_format(addr: str) -> QTextCharFormat:
-            nonlocal tf_used_recv, tf_used_change, tf_used_2fa, tf_used_swap
+        def addr_text_format(addr: str, is_sp: bool = False) -> QTextCharFormat:
+            nonlocal tf_used_recv, tf_used_change, tf_used_2fa, tf_used_swap, tf_used_sp
             sm = self.wallet.lnworker.swap_manager if self.wallet.lnworker else None
             if self.wallet.is_mine(addr):
                 if self.wallet.is_change(addr):
@@ -201,6 +206,9 @@ class TxInOutWidget(QWidget):
             elif self.wallet.is_billing_address(addr):
                 tf_used_2fa = True
                 return self.txo_color_2fa.text_char_format
+            elif is_sp:
+                tf_used_sp = True
+                return self.txo_color_silent_payment.text_char_format
             return ext
 
         def insert_tx_io(
@@ -212,9 +220,10 @@ class TxInOutWidget(QWidget):
             short_id: str,
             addr: Optional[str],
             value: Optional[int],
+            sp_addr: str = None
         ):
             tcf_ext = QTextCharFormat(ext)
-            tcf_addr = addr_text_format(addr)
+            tcf_addr = addr_text_format(addr, bool(sp_addr))
             if tcf_shortid is None:
                 tcf_shortid = tcf_ext
             a_name = f"txio_idx {txio_idx}"
@@ -232,6 +241,8 @@ class TxInOutWidget(QWidget):
                     address_str = '<address unknown>'
                 elif len(addr) <= 42:
                     address_str = addr
+                elif sp_addr:
+                    address_str = f"{addr[:9]}…{addr[-10:]} ({sp_addr[:9]}…{sp_addr[-9:]})"
                 else:
                     address_str = addr[0:30] + '…' + addr[-11:]
                 cursor.insertText(address_str, tcf_addr)
@@ -285,15 +296,17 @@ class TxInOutWidget(QWidget):
             else:
                 short_id = f"unknown:{txout_idx}"
             addr = o.get_ui_address_str()
+            sp_addr = o.sp_addr.encoded if o.is_silent_payment() else None
             insert_tx_io(
                 cursor=cursor, is_coinbase=False, txio_idx=txout_idx,
-                short_id=str(short_id), addr=addr, value=o.value,
+                short_id=str(short_id), addr=addr, value=o.value, sp_addr=sp_addr
             )
 
         self.txo_color_recv.legend_label.setVisible(tf_used_recv)
         self.txo_color_change.legend_label.setVisible(tf_used_change)
         self.txo_color_2fa.legend_label.setVisible(tf_used_2fa)
         self.txo_color_swap.legend_label.setVisible(tf_used_swap)
+        self.txo_color_silent_payment.legend_label.setVisible(tf_used_sp)
 
     def _open_internal_link(self, target):
         """Accepts either a str txid, str address, or a QUrl which should be
@@ -374,17 +387,21 @@ class TxInOutWidget(QWidget):
         copy_list = []
         # figure out which output they right-clicked on. output lines have an anchor named "txio_idx N"
         txout_idx = int(name.split()[1])  # split "txio_idx N", translate N -> int
+        out = self.tx.outputs()[txout_idx]
         menu.addAction(_("Tx Output #{}").format(txout_idx)).setDisabled(True)
         menu.addSeparator()
         if tx_hash := self.tx.txid():
             outpoint = TxOutpoint(bytes.fromhex(tx_hash), txout_idx)
             copy_list += [(_("Copy Outpoint"), lambda: self.main_window.do_copy(outpoint.to_str()))]
-        if addr := self.tx.outputs()[txout_idx].address:
+        if addr := out.address:
             if self.wallet.is_mine(addr):
                 show_list += [(_("Address Details"), lambda: self.main_window.show_address(addr, parent=self))]
-            copy_list += [(_("Copy Address"), lambda: self.main_window.do_copy(addr))]
+            copy_list += [(_(f"Copy {"On Chain " if out.is_silent_payment() else ""}Address"),
+                           lambda: self.main_window.do_copy(addr))]
+        if out.is_silent_payment():
+            copy_list += [(_("Copy Silent Payment Address"), lambda: self.main_window.do_copy(out.sp_addr.encoded))]
         else:
-            spk = self.tx.outputs()[txout_idx].scriptpubkey
+            spk = out.scriptpubkey
             copy_list += [(_("Copy scriptPubKey"), lambda: self.main_window.do_copy(spk.hex()))]
         txout_value = self.tx.outputs()[txout_idx].value
         value_str = self.main_window.format_amount(txout_value, add_thousands_sep=False)

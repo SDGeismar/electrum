@@ -779,6 +779,10 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
                     parent.show_message(_('Payment sent.') + '\n' + msg)
                     self.invoice_list.update()
                     self.wallet.set_broadcasting(tx, broadcasting_status=PR_BROADCAST)
+                    # Save silent payment addresses if any
+                    for output in tx.outputs():
+                        if output.is_silent_payment():
+                            self.wallet.db.add_silent_payment_address(output.address, output.sp_addr.encoded)
                 else:
                     msg = msg or ''
                     parent.show_error(msg)

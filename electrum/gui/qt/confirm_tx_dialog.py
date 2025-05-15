@@ -545,9 +545,13 @@ class TxEditor(WindowModalDialog):
         num_ismine = sum(int(o.is_mine) for o in self.tx.outputs())
         if num_change > 1:
             messages.append(_('This transaction has {} change outputs.'.format(num_change)))
+
+        if self.tx.contains_silent_payment():
+            messages.append(_('This transaction contains silent payments. Make sure you pay enough fee, '
+                              'as fee bumping will not be possible after broadcasting.'))
         # warn if there is no ismine output, as it might be problematic to RBF the tx later.
         # (though RBF is still possible by adding new inputs, if the wallet has more utxos)
-        if num_ismine == 0:
+        elif num_ismine == 0: # Don't append basically same message twice (hence elif)
             messages.append(_('Make sure you pay enough mining fees; you will not be able to bump the fee later.'))
 
         # TODO: warn if we send change back to input address
@@ -643,7 +647,8 @@ class ConfirmTxDialog(TxEditor):
             self.tx = None
             self.main_window.show_error(str(e))
             raise
-        self.tx.set_rbf(True)
+        # sp-tx should be final
+        self.tx.set_rbf(False if self.tx.contains_silent_payment() else True)
 
     def can_pay_assuming_zero_fees(self, confirmed_only: bool) -> bool:
         # called in send_tab.py

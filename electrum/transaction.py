@@ -144,6 +144,7 @@ class TxOutput:
         if not (isinstance(value, int) or parse_max_spend(value) is not None):
             raise ValueError(f"bad txout value: {value!r}")
         self.value = value  # int in satoshis; or spend-max-like str
+        self.sp_addr = None  # type: Optional[SilentPaymentAddress] # if set, this output is a silent payment
 
     @classmethod
     def from_address_and_value(cls, address: str, value: Union[int, str]) -> Union['TxOutput', 'PartialTxOutput']:
@@ -199,6 +200,9 @@ class TxOutput:
         if addr is not None:
             return addr
         return f"SCRIPT {self.scriptpubkey.hex()}"
+
+    def is_silent_payment(self):
+        return self.sp_addr is not None
 
     def __repr__(self):
         return f"<TxOutput script={self.scriptpubkey.hex()} address={self.address} value={self.value}>"
@@ -1070,6 +1074,9 @@ class Transaction:
         # populate prev_txs
         for txin in self.inputs():
             wallet.add_input_info(txin)
+        # pupulate silent payment info if any
+        for txout in self.outputs():
+            wallet.add_silent_payment_output_info(txout)
 
     async def add_info_from_network(
         self,
@@ -1136,6 +1143,9 @@ class Transaction:
             show_error(repr(e))
             return False
         return True
+
+    def contains_silent_payment(self):
+        return any(o.is_silent_payment() for o in self.outputs())
 
     def is_rbf_enabled(self) -> bool:
         """Whether the tx explicitly signals BIP-0125 replace-by-fee."""
@@ -1877,8 +1887,6 @@ class PartialTxOutput(TxOutput, PSBTSection):
         self.is_mine = False  # type: bool  # whether the wallet considers the output to be ismine
         self.is_change = False  # type: bool  # whether the wallet considers the output to be change
         self.is_utxo_reserve = False  # type: bool  # whether this is a change output added to satisfy anchor channel requirements
-        self.sp_addr = None # type: Optional[SilentPaymentAddress] # if set, this output is a silent payment
-        #TODO: Should sp_addr be stored in TxOutput instead? Also, find out how to resolve import Errors
 
     @property
     def pubkeys(self) -> Set[bytes]:
@@ -1898,9 +1906,6 @@ class PartialTxOutput(TxOutput, PSBTSection):
                 self.redeem_script = desc.expand().redeem_script
             if self.witness_script is None:
                 self.witness_script = desc.expand().witness_script
-
-    def is_silent_payment(self):
-        return self.sp_addr is not None
 
     def to_json(self):
         d = super().to_json()
