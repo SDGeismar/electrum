@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import defaultdict
+
 from electrum_ecc import ECPubkey, ECPrivkey
 from electrum_ecc.util import bip340_tagged_hash
 
@@ -48,6 +50,15 @@ class SilentPaymentAddress:
     @property
     def B_Spend(self) -> ecc.ECPubkey:
         return self._B_Spend
+
+    def __eq__(self, other):
+        if not isinstance(other, SilentPaymentAddress):
+            return NotImplemented
+        return self.encoded == other.encoded
+
+    def __hash__(self):
+        return hash(self.encoded)
+
 
 def process_silent_payment_tx(wallet: Standard_Wallet, tx: PartialTransaction):
     #from .wallet import Standard_Wallet
@@ -125,6 +136,73 @@ def _derive_sp_outputs(input_privkeys: list[ECPrivkey], outpoints: list['TxOutpo
             # Like this we make sure, the generated spk's belong to the correct amount entered by the user
             output.scriptpubkey = (b'\x51\x20' + P_km.get_public_key_bytes()[1:])
             k += 1
+
+def create_silent_payment_outputs(input_privkeys: list[ECPrivkey],
+                                  outpoints: list['TxOutpoint'],
+                                  recipients: list[SilentPaymentAddress],
+                                  ) -> dict[SilentPaymentAddress, list[bytes]]:
+    """
+    Derives silent payment taproot scriptPubKeys for a list of recipients.
+
+    Args:
+        input_privkeys (list[ECPrivkey]): The private keys corresponding to the transaction inputs.
+        outpoints (list[TxOutpoint]): The transaction outpoints used for shared secret derivation.
+        recipients (list[SilentPaymentAddress]): The recipient silent payment addresses.
+
+    Returns:
+        dict[SilentPaymentAddress, list[bytes]]: A mapping of recipients to their corresponding
+        derived taproot scriptPubKeys
+
+    Raises:
+        ValueError: If `input_privkeys`, `outpoints`, or `recipients` are empty.
+        Exception: If the sum of input private keys is zero (negligible probability).
+
+    Warning:
+        This function does **not** handle Taproot key negation. The caller is responsible for
+        negating any private keys corresponding to Taproot inputs, if required.
+    """
+    for name, value in [("input_privkeys", input_privkeys), ("outpoints", outpoints), ("recipients", recipients)]:
+        if not value:
+            raise ValueError(f"{name} must not be empty")
+
+    lowest_outpoint: bytes = min([o.serialize_to_network() for o in outpoints])
+
+    a_sum: int = sum([ecc.string_to_number(pk.get_secret_bytes()) for pk in input_privkeys]) % ecc.CURVE_ORDER
+    # This edge-case extremely unlikely, but still has to be taken care of. How should error handling look like?
+    if a_sum == 0:
+        raise Exception("Input private keys sum to zero, cannot derive shared secret") #TODO: Use Custom Exceptions?
+
+    # electrum-ecc takes care of error handling in EC-Multiplication
+    A_sum: ECPubkey = a_sum * ecc.GENERATOR
+
+    input_hash = bip340_tagged_hash(b"BIP0352/Inputs", lowest_outpoint + A_sum.get_public_key_bytes())
+
+    # store the sp_addr along with B_m so we can connect the calculated spk to the correct output later
+    silent_payment_groups: dict[ECPubkey, list[tuple[ECPubkey, SilentPaymentAddress]]] = defaultdict(list)
+
+    for recipient in recipients:
+        B_Scan, B_m = recipient.B_Scan, recipient.B_Spend
+        silent_payment_groups[B_Scan].append((B_m, recipient))
+
+    outputs_dict: dict[SilentPaymentAddress, list[bytes]] = defaultdict(list)
+
+    for B_scan, B_m_values in silent_payment_groups.items():
+        ecdh_shared_secret = ecc.string_to_number(input_hash) * a_sum * B_scan
+        k = 0
+        for B_m, sp_addr in B_m_values:
+            t_k = bip340_tagged_hash(b"BIP0352/SharedSecret",
+                                     ecdh_shared_secret.get_public_key_bytes() + k.to_bytes(4, "big"))
+            # ECPrivKey(t_k) checks (1 < t_k < n), multiplies it by G and behaves like a pub key for addition
+            P_km = B_m + ECPrivkey(t_k) # B_m + t_k * G
+            # append spk and corresponding output index in transaction
+            taproot_spk = b'\x51\x20' + P_km.get_public_key_bytes()[1:]
+            outputs_dict[sp_addr].append(taproot_spk)
+            k += 1
+
+    return outputs_dict
+
+
+
 
 def is_silent_payment_address(addr: str, *, net=None) -> bool:
     if net is None: net = constants.net

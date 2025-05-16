@@ -48,7 +48,7 @@ from .i18n import _
 from .bip32 import BIP32Node, convert_bip32_intpath_to_strpath, convert_bip32_strpath_to_intpath
 from . import util
 from .lntransport import extract_nodeid
-from .silent_payment import SilentPaymentAddress
+from .silent_payment import SilentPaymentAddress, create_silent_payment_outputs
 from .util import (
     NotEnoughFunds, UserCancelled, profiler, OldTaskGroup, format_fee_satoshis,
     WalletFileException, BitcoinException, InvalidPassword, format_time, timestamp_to_datetime,
@@ -2058,14 +2058,32 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         run_hook('make_unsigned_transaction', self, tx)
 
         # DEV: Inject custom silent payment logic for prototyping
-        if any(o.is_silent_payment() for o in tx.outputs()):
-            #Todo: Do we also check self.can_send_silent_payment here!?
-            from .silent_payment import process_silent_payment_tx
-            self.logger.debug("PROCESSING SILENT PAYMENT")
-            process_silent_payment_tx(wallet=self, tx=tx)
-            self.logger.debug(f"Setting RBF before: {tx.is_rbf_enabled()}, {[hex(txin.nsequence) for txin in tx.inputs()]}")
+        if tx.contains_silent_payment():
+            if not self.can_send_silent_payment():
+                raise Exception("Unexpected silent payment outputs found in non silent payment wallet")
+            # collect input privkeys
+            input_privkeys = []
+            for txin in tx.inputs():
+                der_index = self.get_address_index(txin.address)
+                if not der_index:
+                    raise Exception("All inputs must be is_mine to calclulate silent payment outputs")
+                privkey, compressed = self.keystore.get_private_key(der_index, password=None) # User gets prompted when signing
+                if compressed: # will always be true with bip32 keystore.
+                    input_privkeys.append(ecc.ECPrivkey(privkey))
+
+            # collect prevouts
+            outpoints = [txin.prevout for txin in tx.inputs()]
+
+            # collect silent payment recipients
+            sp_recipients = [o.sp_addr for o in tx.outputs() if o.is_silent_payment()]
+            spks_by_sp_addr = create_silent_payment_outputs(input_privkeys, outpoints, sp_recipients)
+            # replace dummy spks with calculated taproot spks
+            sp_outputs = [o for o in tx.outputs() if o.is_silent_payment()]
+            for sp_output in sp_outputs:
+                tr_spk = spks_by_sp_addr.get(sp_output.sp_addr).pop()
+                sp_output.scriptpubkey = tr_spk
+            assert all(not lst for lst in spks_by_sp_addr.values()), "Found remaining sp_spks, but no more outputs left"
             tx.set_rbf(False) # Transaction should be final
-            self.logger.debug(f"Setting RBF after: {tx.is_rbf_enabled()}, {[hex(txin.nsequence) for txin in tx.inputs()]}")
 
         return tx
 

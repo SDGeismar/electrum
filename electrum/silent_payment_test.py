@@ -2,13 +2,14 @@ import json
 
 from electrum_ecc import ECPrivkey
 
-from .bip352 import SilentPaymentAddress
-from .silent_payment import _derive_sp_outputs
+from .silent_payment import SilentPaymentAddress
+from .silent_payment import _derive_sp_outputs, create_silent_payment_outputs
 from .transaction import TxOutpoint, PartialTxOutput
 from .util import bfh
+from .constants import BitcoinMainnet
 
 
-def test_derive_sp_outputs():
+def test_create_sp_outputs():
     with open("sp_send_test_vectors.json", "r") as f:
         test_data = json.loads(f.read())
         print("\n--- Starting silent payment test ---\n")
@@ -43,17 +44,12 @@ def test_derive_sp_outputs():
                     outpoints.append(TxOutpoint(txid=bfh(txin["txid"]), out_idx=txin["vout"]))
                     input_privkeys.append(ECPrivkey(bfh(txin["private_key"])))
 
-                dummy_outputs: list[PartialTxOutput] = []
+                recipients = [SilentPaymentAddress(recipient, net=BitcoinMainnet) for recipient in given["recipients"]]
 
-                for recipient in given["recipients"]:
-                    dummy_output: PartialTxOutput = PartialTxOutput(value=1, scriptpubkey=bytes(34))
-                    dummy_output.sp_addr = SilentPaymentAddress(recipient, hrp="sp")
-                    dummy_outputs.append(dummy_output)
-
-                _derive_sp_outputs(input_privkeys, outpoints, dummy_outputs)
+                outputs_map = create_silent_payment_outputs(input_privkeys, outpoints, recipients)
 
                 # for test purposes, only match the pubkey (exclude the '\x51\x20' which encodes a taproot output)
-                sending_outputs: list[str] = [o.scriptpubkey.hex()[4:] for o in dummy_outputs]
+                sending_outputs: list[str] = [spk.hex()[4:] for spk_lst in outputs_map.values() for spk in spk_lst]
                 assert (any(set(sending_outputs) == set(lst) for lst in expected["outputs"])), "Sending test failed"
                 print("PASSED\n")
                 case_count += 1
@@ -63,4 +59,4 @@ def test_derive_sp_outputs():
 
 
 if __name__ == "__main__":
-    test_derive_sp_outputs()
+    test_create_sp_outputs()
