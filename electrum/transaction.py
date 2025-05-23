@@ -167,17 +167,12 @@ class TxOutput:
         return txout
 
     def to_legacy_tuple(self) -> Tuple[int, str, Union[int, str]]:
-        if self.is_silent_payment(): return TYPE_ADDRESS, self.sp_addr.encoded, self.value
         if self.address:
             return TYPE_ADDRESS, self.address, self.value
         return TYPE_SCRIPT, self.scriptpubkey.hex(), self.value
 
     @classmethod
     def from_legacy_tuple(cls, _type: int, addr: str, val: Union[int, str]) -> Union['TxOutput', 'PartialTxOutput']:
-        if is_silent_payment_address(addr):
-            out = cls(scriptpubkey=SILENT_PAYMENT_DUMMY_SPK, value=val)
-            out.sp_addr = SilentPaymentAddress(addr)
-            return out
         if _type == TYPE_ADDRESS:
             return cls.from_address_and_value(addr, val)
         if _type == TYPE_SCRIPT:
@@ -702,11 +697,13 @@ def merge_duplicate_tx_outputs(outputs: Iterable['PartialTxOutput']) -> List['Pa
     """Merges outputs that are paying to the same address by replacing them with a single larger output."""
     output_dict = {}
     for output in outputs:
+        spk = output.scriptpubkey
+        key = output.sp_addr if output.is_silent_payment() and spk == SILENT_PAYMENT_DUMMY_SPK else spk
         assert isinstance(output.value, int), "tx outputs with spend-max-like str cannot be merged"
-        if output.scriptpubkey in output_dict:
-            output_dict[output.scriptpubkey].value += output.value
+        if key in output_dict:
+            output_dict[key].value += output.value
         else:
-            output_dict[output.scriptpubkey] = copy.copy(output)
+            output_dict[key] = copy.copy(output)
     return list(output_dict.values())
 
 def match_script_against_template(script, template, debug=False) -> bool:
@@ -1924,7 +1921,7 @@ class PartialTxOutput(TxOutput, PSBTSection):
         return d
 
     def __repr__(self):
-        return super().__repr__() + (f"sp_addr={self.sp_addr.encoded}" if self.sp_addr else "")
+        return super().__repr__()
 
     @classmethod
     def from_txout(cls, txout: TxOutput) -> 'PartialTxOutput':

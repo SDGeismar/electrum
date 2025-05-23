@@ -1,7 +1,7 @@
 # Copyright (C) 2022 The Electrum developers
 # Distributed under the MIT software license, see the accompanying
 # file LICENCE or http://www.opensource.org/licenses/mit-license.php
-
+from collections import defaultdict
 from decimal import Decimal
 from typing import Optional, TYPE_CHECKING, Sequence, List, Callable, Union, Mapping
 
@@ -51,6 +51,8 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
         self.format_amount_and_units = window.format_amount_and_units
         self.format_amount = window.format_amount
         self.base_unit = window.base_unit
+
+        self.wallet_can_send_sp = self.wallet.can_send_silent_payment()
 
         self.pending_invoice = None
 
@@ -157,13 +159,7 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
         #buttons1.addStretch(1)
         #grid.addLayout(buttons1, 0, 1, 1, 4)
 
-        ### CUT THIS LATER
-        from electrum.bip352 import handle_silent_payment
-        self.dummy_button = EnterButton("Run Silent Test", lambda: handle_silent_payment(self.wallet))
-        ###
-
         buttons = QHBoxLayout()
-        buttons.addWidget(self.dummy_button) ### CUT THIS ALSO
         buttons.addWidget(self.paste_button)
         buttons.addWidget(self.clear_button)
         buttons.addStretch(1)
@@ -226,7 +222,8 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
         is_spk_script = pi.type == PaymentIdentifierType.SPK and not pi.spk_is_address
         valid_amount = is_spk_script or bool(self.amount_e.get_amount())
         ready_to_finalize = not pi.need_resolve()
-        self.send_button.setEnabled(pi.is_valid() and not pi_error and valid_amount and ready_to_finalize)
+        sp_ok = self.wallet_can_send_sp if pi.involves_silent_payments() else True
+        self.send_button.setEnabled(pi.is_valid() and not pi_error and valid_amount and ready_to_finalize and sp_ok)
 
     def do_paste(self):
         self.logger.debug('do_paste')
@@ -333,7 +330,6 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
         output_values = [x.value for x in outputs]
         is_max = any(parse_max_spend(outval) for outval in output_values)
         output_value = '!' if is_max else sum(output_values)
-
         candidates = self.wallet.get_candidates_for_batching(outputs, []) # coins not used
         tx, is_preview = self.window.confirm_tx_dialog(make_tx, output_value, batching_candidates=candidates)
         if tx is None:
@@ -424,11 +420,14 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
 
         self.clear_button.setEnabled(True)
 
+        involves_sp = pi.involves_silent_payments() # invoices involving silent payment are not persisted
+        sp_ok = self.wallet_can_send_sp if involves_sp else True
+
         if pi.is_multiline():
             self.lock_fields(lock_recipient=False, lock_amount=True, lock_max=True, lock_description=False)
-            self.set_field_validated(self.payto_e, validated=pi.is_valid())  # TODO: validated used differently here than openalias
-            self.save_button.setEnabled(pi.is_valid())
-            self.send_button.setEnabled(pi.is_valid())
+            self.set_field_validated(self.payto_e, validated=(pi.is_valid() and sp_ok))  # TODO: validated used differently here than openalias
+            self.save_button.setEnabled(pi.is_valid() and not involves_sp)
+            self.send_button.setEnabled(pi.is_valid() and sp_ok)
             self.payto_e.setToolTip(pi.get_error() if not pi.is_valid() else '')
             if pi.is_valid():
                 self.handle_multiline(pi.multiline_outputs)
@@ -476,14 +475,15 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
         if not lock_max and self.amount_e.text() == '!':
             self.spend_max()
 
-        pi_unusable = pi.is_error() or (not self.wallet.has_lightning() and not pi.is_onchain())
+        pi_unusable = (pi.is_error() or (not self.wallet.has_lightning() and not pi.is_onchain()) or not sp_ok)
         is_spk_script = pi.type == PaymentIdentifierType.SPK and not pi.spk_is_address
 
         amount_valid = is_spk_script or bool(self.amount_e.get_amount())
 
         self.send_button.setEnabled(not pi_unusable and amount_valid and not pi.has_expired())
         self.save_button.setEnabled(not pi_unusable and not is_spk_script and not pi.has_expired() and \
-                                    pi.type not in [PaymentIdentifierType.LNURLP, PaymentIdentifierType.LNADDR])
+                                    pi.type not in [PaymentIdentifierType.LNURLP, PaymentIdentifierType.LNADDR] and \
+                                    not involves_sp)
 
         self.invoice_error.setText(_('Expired') if pi.has_expired() else '')
 

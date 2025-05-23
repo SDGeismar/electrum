@@ -39,6 +39,7 @@ from electrum.transaction import Transaction, PartialTransaction
 from electrum.wallet import InternalAddressCorruption
 from electrum.bitcoin import DummyAddress
 from electrum.fee_policy import FeePolicy, FixedFeePolicy
+from electrum.silent_payment import SilentPaymentException
 
 from .util import (WindowModalDialog, ColorScheme, HelpLabel, Buttons, CancelButton,
                    WWLabel, read_QIcon)
@@ -647,6 +648,10 @@ class ConfirmTxDialog(TxEditor):
             self.tx = None
             self.main_window.show_error(str(e))
             raise
+        except SilentPaymentException as e:
+            self.tx = None
+            self.error = e.message
+            return
         # sp-tx should be final
         self.tx.set_rbf(False if self.tx.contains_silent_payment() else True)
 

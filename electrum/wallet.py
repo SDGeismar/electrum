@@ -48,7 +48,9 @@ from .i18n import _
 from .bip32 import BIP32Node, convert_bip32_intpath_to_strpath, convert_bip32_strpath_to_intpath
 from . import util
 from .lntransport import extract_nodeid
-from .silent_payment import SilentPaymentAddress, create_silent_payment_outputs
+from .silent_payment import SilentPaymentAddress, create_silent_payment_outputs, SilentPaymentException, \
+    SilentPaymentReuseException, SilentPaymentDerivationFailure, SilentPaymentInputsNotOwnedException, \
+    SILENT_PAYMENT_DUMMY_SPK
 from .util import (
     NotEnoughFunds, UserCancelled, profiler, OldTaskGroup, format_fee_satoshis,
     WalletFileException, BitcoinException, InvalidPassword, format_time, timestamp_to_datetime,
@@ -1259,6 +1261,10 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         return invoice
 
     def save_invoice(self, invoice: Invoice, *, write_to_disk: bool = True) -> None:
+        # ignore invoices with silent payment outputs
+        if any(o.is_silent_payment() for o in invoice.get_outputs()):
+            _logger.debug("Skipping invoice persistence: contains silent payment outputs")
+            return
         key = invoice.get_id()
         if not invoice.is_lightning():
             if self.is_onchain_invoice_paid(invoice)[0]:
@@ -1364,6 +1370,9 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         """Returns whether on-chain invoice/request is satisfied, num confs required txs have,
         and list of relevant TXIDs.
         """
+        # note: For silent payment outputs: if the invoice is not paid, the sp_outputs hold a dummy_spk.
+        #       Because there will never be entries in the db with this dummy_spk as key, this function
+        #       will always return is_paid = False if unpaid sp_outputs are involved, which is the desired behavior.
         outputs = invoice.get_outputs()
         if not outputs:  # e.g. lightning-only
             return False, None, []
@@ -1908,8 +1917,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             tx_version: Optional[int] = None,
             is_anchor_channel_opening: bool = False,
     ) -> PartialTransaction:
-        """Can raise NotEnoughFunds or NoDynamicFeeEstimates."""
-
+        """Can raise NotEnoughFunds, NoDynamicFeeEstimates or SilentPaymentException."""
         if coins is None:
             coins = self.get_spendable_coins()
         if not inputs and not coins:  # any bitcoin tx must have at least 1 input by consensus
@@ -2061,12 +2069,17 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         if tx.contains_silent_payment():
             if not self.can_send_silent_payment():
                 raise Exception("Unexpected silent payment outputs found in non silent payment wallet")
+            # If we can, we don't let the user pay to a previously calculated address from a silent payment
+            for out in tx.outputs():
+                if self.db.get_silent_payment_address(out.address):
+                    raise SilentPaymentReuseException(out.address)
+
             # collect input privkeys
             input_privkeys = []
             for txin in tx.inputs():
                 der_index = self.get_address_index(txin.address)
                 if not der_index:
-                    raise Exception("All inputs must be is_mine to calclulate silent payment outputs")
+                    raise SilentPaymentInputsNotOwnedException()
                 privkey, compressed = self.keystore.get_private_key(der_index, password=None) # User gets prompted when signing
                 if compressed: # will always be true with bip32 keystore.
                     input_privkeys.append(ecc.ECPrivkey(privkey))
@@ -2077,6 +2090,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             # collect silent payment recipients
             sp_recipients = [o.sp_addr for o in tx.outputs() if o.is_silent_payment()]
             spks_by_sp_addr = create_silent_payment_outputs(input_privkeys, outpoints, sp_recipients)
+
             # replace dummy spks with calculated taproot spks
             sp_outputs = [o for o in tx.outputs() if o.is_silent_payment()]
             for sp_output in sp_outputs:
@@ -2715,6 +2729,9 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             return
         if any(DummyAddress.is_dummy_address(txout.address) for txout in tx.outputs()):
             raise DummyAddressUsedInTxException("tried to sign tx with dummy address!")
+
+        if any(o.scriptpubkey == SILENT_PAYMENT_DUMMY_SPK for o in tx.outputs()):
+            raise SilentPaymentException("tried to sign tx with silent payment dummy SPK!")
 
         # check if signing is dangerous
         sh_danger = self.check_sighash(tx)

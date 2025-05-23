@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections import defaultdict
 
 from electrum_ecc import ECPubkey, ECPrivkey
@@ -59,7 +57,7 @@ class SilentPaymentAddress:
     def __hash__(self):
         return hash(self.encoded)
 
-
+"""
 def process_silent_payment_tx(wallet: Standard_Wallet, tx: PartialTransaction):
     #from .wallet import Standard_Wallet
     assert isinstance(wallet, Standard_Wallet)
@@ -90,16 +88,9 @@ def process_silent_payment_tx(wallet: Standard_Wallet, tx: PartialTransaction):
 
     # Isolate core logic to allow efficient testing
     _derive_sp_outputs(input_privkeys, outpoints, sp_dummy_outputs)
-
-
+"""
+"""
 def _derive_sp_outputs(input_privkeys: list[ECPrivkey], outpoints: list['TxOutpoint'], sp_dummy_outputs: list['PartialTxOutput']):
-    """
-        Derives the final output public keys for silent payment recipients and updates the corresponding dummy spk with the correct spk.
-        Args:
-            input_privkeys: List of ECPrivkey instances for all eligible transaction inputs.
-            outpoints: List of TxOutpoints used for shared secret derivation.
-            sp_dummy_outputs: List of PartialTxOutputs each tagged with a SilentPaymentAddress in the `sp_addr` attribute. The spk's of these outputs will be updated accordingly.
-    """
     # Ignores negating private keys, since taproot inputs are not yet supported by electrum
 
     lowest_outpoint: bytes = min([o.serialize_to_network() for o in outpoints])
@@ -136,6 +127,38 @@ def _derive_sp_outputs(input_privkeys: list[ECPrivkey], outpoints: list['TxOutpo
             # Like this we make sure, the generated spk's belong to the correct amount entered by the user
             output.scriptpubkey = (b'\x51\x20' + P_km.get_public_key_bytes()[1:])
             k += 1
+"""
+class SilentPaymentException(Exception):
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(message)
+
+class SilentPaymentReuseException(SilentPaymentException):
+    def __init__(self, reused_address: str):
+        short_addr = reused_address[:8] + "…" + reused_address[-8:]
+        message = (
+            f"Detected reuse of a previously derived silent payment address: ({short_addr})\n\n"
+            f"Never send funds to an address that was previously derived from a Silent Payment address. "
+            f"Doing so can lead to loss of funds, as these addresses are intended to be single-use and unlinkable."
+        )
+        super().__init__(message)
+
+class SilentPaymentDerivationFailure(SilentPaymentException):
+    def __init__(self):
+        message = (
+            "Unable to complete silent payment derivation due to an extremely rare edge case.\n\n"
+            "Try using a different set of coins. You can adjust the inputs manually using coin control."
+        )
+        super().__init__(message)
+
+class SilentPaymentInputsNotOwnedException(SilentPaymentException):
+    def __init__(self):
+        msg = (
+            "Silent Payment derivation failed because one or more transaction inputs "
+            "do not belong to this wallet.\n\n"
+            f"To make Silent Payments, all transaction inputs must be owned by this wallet."
+        )
+        super().__init__(msg)
 
 def create_silent_payment_outputs(input_privkeys: list[ECPrivkey],
                                   outpoints: list['TxOutpoint'],
@@ -155,7 +178,7 @@ def create_silent_payment_outputs(input_privkeys: list[ECPrivkey],
 
     Raises:
         ValueError: If `input_privkeys`, `outpoints`, or `recipients` are empty.
-        Exception: If the sum of input private keys is zero (negligible probability).
+        SilentPaymentDerivationFailure: If the sum of input private keys is zero (negligible probability).
 
     Warning:
         This function does **not** handle Taproot key negation. The caller is responsible for
@@ -166,11 +189,9 @@ def create_silent_payment_outputs(input_privkeys: list[ECPrivkey],
             raise ValueError(f"{name} must not be empty")
 
     lowest_outpoint: bytes = min([o.serialize_to_network() for o in outpoints])
-
     a_sum: int = sum([ecc.string_to_number(pk.get_secret_bytes()) for pk in input_privkeys]) % ecc.CURVE_ORDER
-    # This edge-case extremely unlikely, but still has to be taken care of. How should error handling look like?
-    if a_sum == 0:
-        raise Exception("Input private keys sum to zero, cannot derive shared secret") #TODO: Use Custom Exceptions?
+    # This edge-case extremely unlikely, but still has to be taken care of.
+    if a_sum == 0: raise SilentPaymentDerivationFailure()
 
     # electrum-ecc takes care of error handling in EC-Multiplication
     A_sum: ECPubkey = a_sum * ecc.GENERATOR

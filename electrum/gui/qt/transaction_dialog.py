@@ -60,7 +60,6 @@ from .util import (MessageBoxMixin, read_QIcon, Buttons, icon_path,
                    get_iconname_qrcode, VLine, WaitingDialog)
 from .rate_limiter import rate_limited
 from .my_treeview import create_toolbar_with_menu, QMenuWithConfig
-from ...lnutil import received_htlc_trim_threshold_sat
 
 if TYPE_CHECKING:
     from .main_window import ElectrumWindow

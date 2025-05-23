@@ -470,6 +470,7 @@ class PaymentIdentifier(Logger):
                 on_finished(self)
 
     def get_onchain_outputs(self, amount):
+        # TODO: keep pi more general and add guards outside and check why it worked with old wallet
         if self.bip70: # TODO: Should this involve silent payments???
             return self.bip70_data.get_outputs()
         elif self.multiline_outputs:
@@ -545,7 +546,7 @@ class PaymentIdentifier(Logger):
         except Exception as e:
             pass
         if is_silent_payment_address(x):
-            return SILENT_PAYMENT_DUMMY_SPK, True
+            return SILENT_PAYMENT_DUMMY_SPK, True # Should be treated as address
         return None, False
 
     def parse_script(self, x: str) -> bytes:
@@ -688,6 +689,12 @@ class PaymentIdentifier(Logger):
             expires = self.bip21.get('exp') + self.bip21.get('time') if self.bip21.get('exp') else 0
             return bool(expires) and expires < time.time()
         return False
+
+    def involves_silent_payments(self):
+        try:
+            return any(o.is_silent_payment() for o in self.get_onchain_outputs(0))
+        except Exception as e:
+            return False
 
 
 def invoice_from_payment_identifier(

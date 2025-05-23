@@ -284,10 +284,7 @@ class Invoice(BaseInvoice):
     def get_address(self) -> Optional[str]:
         address = None
         if self.outputs:
-            first_out = self.outputs[0]
-            address = first_out.address if len(self.outputs) > 0 else None
-            if not address and first_out.is_silent_payment():
-                address = first_out.sp_addr.encoded
+            address = self.outputs[0].address if len(self.outputs) > 0 else None
         if not address and self.is_lightning():
             address = self._lnaddr.get_fallback_address() or None
         return address

@@ -1585,7 +1585,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger, QtEventListener):
             grid.addWidget(QLabel(_("Address") + ':'), 2, 0)
             grid.addWidget(QLabel(invoice.get_address()), 2, 1)
         else:
-            #TODO: fails with multiline address and script
+            #Fixme: fails with multiline address and script (concat None)
             outputs_str = '\n'.join(map(lambda x: x.address + ' : ' + self.format_amount(x.value)+ self.base_unit(), invoice.outputs))
             grid.addWidget(QLabel(_("Outputs") + ':'), 2, 0)
             grid.addWidget(QLabel(outputs_str), 2, 1)
