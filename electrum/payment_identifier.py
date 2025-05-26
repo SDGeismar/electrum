@@ -470,7 +470,6 @@ class PaymentIdentifier(Logger):
                 on_finished(self)
 
     def get_onchain_outputs(self, amount):
-        # TODO: keep pi more general and add guards outside and check why it worked with old wallet
         if self.bip70: # TODO: Should this involve silent payments???
             return self.bip70_data.get_outputs()
         elif self.multiline_outputs:
@@ -478,7 +477,7 @@ class PaymentIdentifier(Logger):
         elif self.spk:
             output = PartialTxOutput(scriptpubkey=self.spk, value=amount)
             if self.spk == SILENT_PAYMENT_DUMMY_SPK:
-                output.sp_addr = SilentPaymentAddress(self.text) #TODO: This can raise, but it should not be possible, how to deal with it?
+                output.sp_addr = SilentPaymentAddress(self.text)
             return [output]
             #return [PartialTxOutput(scriptpubkey=self.spk, value=amount)]
         elif self.bip21:
@@ -489,7 +488,6 @@ class PaymentIdentifier(Logger):
             if scriptpubkey == SILENT_PAYMENT_DUMMY_SPK:
                 output.sp_addr = SilentPaymentAddress(address)
             return [output]
-            #return [PartialTxOutput(scriptpubkey=scriptpubkey, value=amount)]
         else:
             raise Exception('not onchain')
 

@@ -3,7 +3,7 @@ import json
 from electrum_ecc import ECPrivkey
 
 from .silent_payment import SilentPaymentAddress
-from .silent_payment import _derive_sp_outputs, create_silent_payment_outputs
+from .silent_payment import create_silent_payment_outputs
 from .transaction import TxOutpoint, PartialTxOutput
 from .util import bfh
 from .constants import BitcoinMainnet
