@@ -50,7 +50,7 @@ from . import util
 from .lntransport import extract_nodeid
 from .silent_payment import SilentPaymentAddress, create_silent_payment_outputs, SilentPaymentException, \
     SilentPaymentReuseException, SilentPaymentDerivationFailure, SilentPaymentInputsNotOwnedException, \
-    SILENT_PAYMENT_DUMMY_SPK
+    SILENT_PAYMENT_DUMMY_SPK, is_silent_payment_address
 from .util import (
     NotEnoughFunds, UserCancelled, profiler, OldTaskGroup, format_fee_satoshis,
     WalletFileException, BitcoinException, InvalidPassword, format_time, timestamp_to_datetime,
@@ -1229,6 +1229,13 @@ class Abstract_Wallet(ABC, Logger, EventListener):
 
         return transactions
 
+    def save_silent_payment_address(self, onchain_address: str, silent_payment_address: str):
+        """Saves the silent payment address by the derived onchain address."""
+        assert is_address(onchain_address), 'tried to save silent payment address with invalid onchain address'
+        assert is_silent_payment_address(silent_payment_address), 'tried to save invalid silent payment address'
+        self.db.add_silent_payment_address(onchain_address, silent_payment_address)
+        self.save_db()
+
     def create_invoice(self, *, outputs: List[PartialTxOutput], message, pr, URI) -> Invoice:
         height = self.adb.get_local_height()
         if pr:
@@ -2068,7 +2075,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         # DEV: Inject custom silent payment logic for prototyping
         if tx.contains_silent_payment():
             if not self.can_send_silent_payment():
-                raise Exception("Unexpected silent payment outputs found in non silent payment wallet")
+                raise SilentPaymentException("This wallet cannot send silent payments")
             # If we can, we don't let the user pay to a previously calculated address from a silent payment
             for out in tx.outputs():
                 if self.db.get_silent_payment_address(out.address):
@@ -2739,6 +2746,11 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             raise TransactionDangerousException('Not signing transaction:\n' + sh_danger.get_long_message())
         if sh_danger.needs_confirm() and not ignore_warnings:
             raise TransactionPotentiallyDangerousException('Not signing transaction:\n' + sh_danger.get_long_message())
+
+        # transactions containing silent payments should have 'safe' sighash only
+        if tx.contains_silent_payment() and sh_danger.risk_level != TxSighashRiskLevel.SAFE:
+            raise TransactionDangerousException('Not signing transaction:\n'
+                                                'Transactions containing silent payments must use SIGHASH.ALL')
 
         # sign with make_witness
         for i, txin in enumerate(tx.inputs()):

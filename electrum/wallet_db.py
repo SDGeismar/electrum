@@ -1477,7 +1477,7 @@ class WalletDB(JsonDB):
         return self.sp_addresses.get(onchain_addr, None)
 
     @modifier
-    def add_silent_payment_address(self, onchain_addr: str, silent_payment_addr) -> None:
+    def add_silent_payment_address(self, onchain_addr: str, silent_payment_addr: str) -> None:
         assert isinstance(onchain_addr, str)
         assert isinstance(silent_payment_addr, str)
         self.sp_addresses[onchain_addr] = silent_payment_addr

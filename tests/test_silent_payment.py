@@ -3,8 +3,9 @@ import os
 
 from electrum_ecc import ECPrivkey
 from electrum.segwit_addr import bech32_encode, convertbits, Encoding
-from electrum.silent_payment import SilentPaymentAddress, create_silent_payment_outputs, SilentPaymentDerivationFailure, _decode_silent_payment_addr
-from electrum.transaction import TxOutpoint
+from electrum.silent_payment import SilentPaymentAddress, create_silent_payment_outputs, SilentPaymentDerivationFailure, \
+    _decode_silent_payment_addr, SILENT_PAYMENT_DUMMY_SPK
+from electrum.transaction import TxOutpoint, PartialTxOutput, merge_duplicate_tx_outputs
 from electrum.util import bfh
 from . import ElectrumTestCase
 
@@ -19,9 +20,8 @@ class TestSilentPaymentCreateOutputs(ElectrumTestCase):
     # compressed public keys. Taproot inputs are not yet supported in electrum.
 
     def test_silent_payment_create_outputs(self):
-        # Note: We do not verify the mapping between SilentPaymentAddress and output(s) here,
-        # because the test vectors do not provide recipient-to-output correspondence.
-        # This test checks that the aggregate set of derived scriptPubKeys matches expectations.
+        # Note: Unlike the BIP352 reference implementation tests, this test also verifies
+        # the correspondence between each silent payment address and its derived outputs.
         test_vector_file = os.path.join(os.path.dirname(__file__), "bip-0352", "sp_send_test_vectors.json")
         with open(test_vector_file, "r") as f:
             vectors = json.load(f)
@@ -40,9 +40,19 @@ class TestSilentPaymentCreateOutputs(ElectrumTestCase):
             recipients = [SilentPaymentAddress(recipient) for recipient in given["recipients"]]
 
             outputs_map = create_silent_payment_outputs(input_privkeys, outpoints, recipients)
-            # We only need the output set for the purpose of this test
-            actual_output_set: set[str] = {spk.hex() for spk_lst in outputs_map.values() for spk in spk_lst}
-            self.assertTrue(any(actual_output_set == set(exp_outputs) for exp_outputs in expected["outputs"]))
+
+            # Normalize actual output
+            actual_map = {
+                addr.encoded: {spk.hex() for spk in spks}
+                for addr, spks in outputs_map.items()
+            }
+
+            # Normalize expected output
+            expected_map = {
+                sp_addr: set(spk_list)
+                for sp_addr, spk_list in expected["outputs_by_sp_addr"].items()
+            }
+            self.assertEqual(actual_map, expected_map)
 
 
     def test_private_keys_sum_to_zero(self):
@@ -100,6 +110,43 @@ class TestSilentPaymentParseAddress(ElectrumTestCase):
             b32 = bech32_encode(Encoding.BECH32, 'sp', [0] + list(convertbits(invalid_pks, 8, 5)))
             _decode_silent_payment_addr('sp', b32)
         self.assertIn("Invalid public key(s) in silent payment address", str(ctx.exception))
+
+class TestSilentPaymentTxCreation(ElectrumTestCase):
+
+    def test_merge_duplicate_tx_outputs(self):
+        sp_addr1 = SilentPaymentAddress("sp1qqtrqglu5g8kh6mfsg4qxa9wq0nv9cauwfwxw70984wkqnw2uwz0w2qnehen8a7wuhwk9tgrzjh8gwzc8q2dlekedec5djk0js9d3d7qhnq6lqj3s")
+        sp_addr2 = SilentPaymentAddress("sp1qq2h2utp7zfk5kpxf8s6rxaz2x899p7un7gdm7ny44mjr87zxglc66qn70vcsuwyxmwuakj5hyh907em68l4wmpmza4cka8zr64caa8ptgqt8khxk")
+        addr1 = "bc1qq2tmmcngng78nllq2pvrkchcdukemtj56uyue0"
+        addr2 = "3DYoBqQ5N6dADzyQjy9FT1Ls4amiYVaqTG"
+
+        sp_output1 = PartialTxOutput(value=1000, scriptpubkey=SILENT_PAYMENT_DUMMY_SPK)
+        sp_output1.sp_addr = sp_addr1
+
+        sp_output2 = PartialTxOutput(value=2100, scriptpubkey=SILENT_PAYMENT_DUMMY_SPK)
+        sp_output2.sp_addr = sp_addr2
+
+        output1 = PartialTxOutput.from_address_and_value(addr1, 3200)
+        output2 = PartialTxOutput.from_address_and_value(addr2, 4300)
+
+        # Test mixed merge
+        merged = merge_duplicate_tx_outputs([sp_output1, sp_output1, sp_output1, sp_output2, output1, output1, output2])
+        self.assertEqual(len(merged), 4)
+        merged.sort(key=lambda o: o.value)
+        self.assertEqual(merged[0].sp_addr, sp_addr2)
+        self.assertEqual(merged[0].value, 2100)
+        self.assertEqual(merged[1].sp_addr, sp_addr1)
+        self.assertEqual(merged[1].value, 3000)
+        self.assertEqual(merged[2].address, addr2)
+        self.assertEqual(merged[2].value, 4300)
+        self.assertEqual(merged[3].address, addr1)
+        self.assertEqual(merged[3].value, 6400)
+
+        # test: don't merge non dummy spk silent payment outputs
+        spk = bfh("51203e9fce73d4e77a4809908e3c3a2e54ee147b9312dc5044a193d1fc85de46e3c1")
+        sp_output1_non_dummy = PartialTxOutput(scriptpubkey=spk, value=1000)
+        sp_output1_non_dummy.sp_addr = sp_addr1
+        merged = merge_duplicate_tx_outputs([sp_output1_non_dummy, sp_output1])
+        self.assertEqual(len(merged), 2)
 
 
 
