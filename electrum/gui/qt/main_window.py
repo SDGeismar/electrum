@@ -1367,6 +1367,10 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger, QtEventListener):
         self.send_tab.broadcast_transaction(tx, payment_identifier=payment_identifier)
 
     @protected
+    def get_pw(self, password):
+        return password
+
+    @protected
     def sign_tx(
         self,
         tx: PartialTransaction,

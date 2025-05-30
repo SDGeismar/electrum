@@ -1923,8 +1923,12 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             locktime: Optional[int] = None,
             tx_version: Optional[int] = None,
             is_anchor_channel_opening: bool = False,
+            password: str = None, # used for silent payment, as private keys are needed for the shared secret
+            mind_silent_payments: bool = False # whether to derive sp outputs (this avoids the need for
+                                               # a password for operations like fee estimates or max-spend)
     ) -> PartialTransaction:
-        """Can raise NotEnoughFunds, NoDynamicFeeEstimates or SilentPaymentException."""
+        """Can raise NotEnoughFunds, NoDynamicFeeEstimates, SilentPaymentException or
+        InvalidPassword (only when dealing with Silent Payments)."""
         if coins is None:
             coins = self.get_spendable_coins()
         if not inputs and not coins:  # any bitcoin tx must have at least 1 input by consensus
@@ -2073,21 +2077,22 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         run_hook('make_unsigned_transaction', self, tx)
 
         # DEV: Inject custom silent payment logic for prototyping
-        if tx.contains_silent_payment():
+        if tx.contains_silent_payment() and mind_silent_payments:
             if not self.can_send_silent_payment():
                 raise SilentPaymentException("This wallet cannot send silent payments")
             # If we can, we don't let the user pay to a previously calculated address from a silent payment
             for out in tx.outputs():
                 if self.db.get_silent_payment_address(out.address):
                     raise SilentPaymentReuseException(out.address)
-
+            # Raise if password is not correct.
+            self.check_password(password)
             # collect input privkeys
             input_privkeys = []
             for txin in tx.inputs():
                 der_index = self.get_address_index(txin.address)
                 if not der_index:
                     raise SilentPaymentInputsNotOwnedException()
-                privkey, compressed = self.keystore.get_private_key(der_index, password=None) # User gets prompted when signing
+                privkey, compressed = self.keystore.get_private_key(der_index, password=password)
                 if compressed: # will always be true with bip32 keystore.
                     input_privkeys.append(ecc.ECPrivkey(privkey))
 

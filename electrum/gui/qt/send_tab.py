@@ -316,6 +316,11 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
         if get_coins is None:
             get_coins = self.window.get_coins
 
+        password = None # used for silent payments, as calculating the shared secret requires private keys
+        if any(o.is_silent_payment() for o in outputs) and self.wallet.has_keystore_encryption():
+            password = self.window.get_pw()
+            if password is None: return # user cancelled
+
         def make_tx(fee_policy, *, confirmed_only=False, base_tx=None):
             coins = get_coins(nonlocal_only=nonlocal_only, confirmed_only=confirmed_only)
             return self.wallet.make_unsigned_transaction(
@@ -326,6 +331,8 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
                 is_sweep=is_sweep,
                 send_change_to_lightning=self.config.WALLET_SEND_CHANGE_TO_LIGHTNING,
                 merge_duplicate_outputs=self.config.WALLET_MERGE_DUPLICATE_OUTPUTS,
+                password=password,
+                mind_silent_payments=True, # always mind silent payments to detect sending to a previous sp-onchain addr
             )
         output_values = [x.value for x in outputs]
         is_max = any(parse_max_spend(outval) for outval in output_values)
